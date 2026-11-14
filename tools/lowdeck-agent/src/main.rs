@@ -149,6 +149,16 @@ impl Hub {
         }
     }
 
+    /// Bağlı istemciyi düşürür (ayar yeniden yüklendi).
+    fn kick(&self) {
+        let mut g = self.lock();
+        if let Some(c) = g.client.take() {
+            let _ = c.w.get_ref().shutdown(Shutdown::Both);
+            drop(g);
+            self.changed();
+        }
+    }
+
     fn detach(&self, id: u64) {
         let mut g = self.lock();
         if g.client.as_ref().is_some_and(|c| c.id == id) {
@@ -226,6 +236,7 @@ fn session(
 
 // ---------------- Ayar ----------------
 
+#[derive(Clone)]
 struct AgentConfig {
     bind: String,
     port: u16,
@@ -259,7 +270,15 @@ fn load_or_create(path: &std::path::Path) -> std::io::Result<AgentConfig> {
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
     }
-    std::fs::write(path, format!("bind={}\nport={}\ntoken={}\n", c.bind, c.port, c.token))?;
+    std::fs::write(
+        path,
+        format!(
+            "# bind: BU PC'nin LAN IP'si (telefonunki değil). Telefon ⚙ bu adres + port + token.\n\
+             # Değişiklikten sonra tray → Ayarı yeniden yükle.\n\
+             bind={}\nport={}\ntoken={}\n",
+            c.bind, c.port, c.token
+        ),
+    )?;
     println!("ayar oluşturuldu: {}", path.display());
     Ok(c)
 }
@@ -283,37 +302,110 @@ fn random_token() -> String {
 
 // ---------------- main ----------------
 
+/// Çalışan dinleyici. `stop` ile kapatılır (yeniden yükleme).
+struct Running {
+    cfg: AgentConfig,
+    addr: std::net::SocketAddr,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+impl Running {
+    fn stop(self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        // accept() bloklu: kendine bağlanarak uyandır, sonra thread (ve dinleyici) bitsin.
+        let _ = TcpStream::connect_timeout(&self.addr, Duration::from_secs(1));
+        let _ = self.thread.join();
+    }
+}
+
+/// 0.0.0.0 değil: yalnız seçilen arayüz (ADR-0002).
+fn listen(cfg: AgentConfig, hub: &Arc<Hub>, backend: &Arc<dyn Backend>) -> std::io::Result<Running> {
+    let listener = TcpListener::bind((cfg.bind.as_str(), cfg.port))?;
+    let addr = listener.local_addr()?;
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (token, hub, backend, s) = (Arc::<str>::from(cfg.token.as_str()), hub.clone(), backend.clone(), stop.clone());
+    let thread = std::thread::Builder::new()
+        .name("lowdeck-accept".into())
+        .spawn(move || accept_loop(listener, token, hub, backend, s))?;
+    Ok(Running { cfg, addr, stop, thread })
+}
+
+/// Kullanıcıya gösterilecek bind hatası; en sık hata: bind'a telefonun IP'sini yazmak.
+fn bind_error(cfg: &AgentConfig, e: &std::io::Error) -> String {
+    match e.raw_os_error() {
+        Some(10049) => format!(
+            "{} bu PC'nin adresi değil (bu PC: {}).\nbind = PC'nin LAN IP'si, telefonunki değil.",
+            cfg.bind,
+            lan_ip()
+        ),
+        Some(10048) => format!("Port {} kullanımda (başka bir program ya da ikinci agent).", cfg.port),
+        _ => format!("{}:{} dinlenemedi: {e}", cfg.bind, cfg.port),
+    }
+}
+
 #[cfg(windows)]
 fn main() {
     if !tray::single_instance() {
         return;
     }
     let path = config_path();
-    // 0.0.0.0 değil: yalnız seçilen arayüz (ADR-0002).
-    let (cfg, listener) = match load_or_create(&path)
-        .and_then(|c| TcpListener::bind((c.bind.as_str(), c.port)).map(|l| (c, l)))
-    {
-        Ok(v) => v,
-        // Konsol yok: başlangıç hatası kullanıcıya kutuyla gösterilir.
-        Err(e) => return tray::fatal(&format!("Başlatılamadı: {e}\n\nAyar: {}", path.display())),
-    };
     let hub = Arc::new(Hub::default());
     let backend: Arc<dyn Backend> = Arc::new(win::start(hub.clone()));
+    let first = match load_or_create(&path) {
+        Ok(c) => listen(c.clone(), &hub, &backend).map_err(|e| bind_error(&c, &e)),
+        Err(e) => Err(e.to_string()),
+    };
+    // Konsol yok: başlangıç hatası kullanıcıya kutuyla gösterilir.
+    let mut running = match first {
+        Ok(r) => Some(r),
+        Err(e) => return tray::error_box(&format!("Başlatılamadı: {e}\n\nAyar: {}", path.display())),
+    };
+    let info_of = {
+        let path = path.clone();
+        move |c: &AgentConfig| tray::Info { bind: c.bind.clone(), port: c.port, token: c.token.clone(), cfg_path: path.clone() }
+    };
+    let info = info_of(&running.as_ref().expect("başladı").cfg);
 
-    let info = tray::Info { bind: cfg.bind.clone(), port: cfg.port, token: cfg.token.clone(), cfg_path: path };
-    let token: Arc<str> = cfg.token.into();
-    {
+    // Tray → "Ayarı yeniden yükle": dosyayı oku, eskiyi durdur, yeniyi aç; olmazsa eskiye dön.
+    let reload = {
         let hub = hub.clone();
-        std::thread::Builder::new()
-            .name("lowdeck-accept".into())
-            .spawn(move || accept_loop(listener, token, hub, backend))
-            .expect("accept thread");
-    }
-    tray::run(info, hub); // mesaj döngüsü; Çıkış ile döner
+        move || -> Result<tray::Info, String> {
+            let new = load_or_create(&path).map_err(|e| e.to_string())?;
+            let old = running.take().map(|r| {
+                let cfg = r.cfg.clone();
+                r.stop();
+                cfg
+            });
+            hub.kick(); // telefon yeni adres/token ile yeniden bağlansın
+            match listen(new.clone(), &hub, &backend) {
+                Ok(r) => {
+                    let info = info_of(&r.cfg);
+                    running = Some(r);
+                    Ok(info)
+                }
+                Err(e) => {
+                    running = old.and_then(|c| listen(c, &hub, &backend).ok());
+                    let state = if running.is_some() { "Eski ayarla devam ediliyor." } else { "Dinleme durdu." };
+                    Err(format!("{}\n\n{state}", bind_error(&new, &e)))
+                }
+            }
+        }
+    };
+    tray::run(info, hub, Box::new(reload)); // mesaj döngüsü; Çıkış ile döner
 }
 
-fn accept_loop(listener: TcpListener, token: Arc<str>, hub: Arc<Hub>, backend: Arc<dyn Backend>) {
+fn accept_loop(
+    listener: TcpListener,
+    token: Arc<str>,
+    hub: Arc<Hub>,
+    backend: Arc<dyn Backend>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+) {
     for conn in listener.incoming() {
+        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
         let Ok(s) = conn else { continue };
         let (hub, backend, token) = (hub.clone(), backend.clone(), token.clone());
         let _ = std::thread::Builder::new()
@@ -401,6 +493,30 @@ mod tests {
         std::thread::sleep(HELLO_TIMEOUT * 2);
         write_frame(&mut w, &C2S::Ping(7)).unwrap();
         assert_eq!(read_frame::<_, S2C>(&mut rd, &mut buf).unwrap(), S2C::Pong(7));
+    }
+
+    /// Yeniden yükleme: stop() dinleyiciyi gerçekten kapatır, aynı port hemen tekrar açılır.
+    #[test]
+    fn reload_rebinds_same_port() {
+        let hub = Arc::new(Hub::default());
+        let backend: Arc<dyn Backend> = Arc::new(Null);
+        let cfg = AgentConfig { bind: "127.0.0.1".into(), port: 0, token: "t".into() };
+        let r = listen(cfg, &hub, &backend).unwrap();
+        let port = r.addr.port();
+        r.stop();
+        let again = AgentConfig { bind: "127.0.0.1".into(), port, token: "t".into() };
+        listen(again, &hub, &backend).expect("aynı port yeniden açılmalı").stop();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bind_error_explains_wrong_ip() {
+        let hub = Arc::new(Hub::default());
+        let backend: Arc<dyn Backend> = Arc::new(Null);
+        // TEST-NET adresi bu PC'de yok → WSAEADDRNOTAVAIL
+        let cfg = AgentConfig { bind: "192.0.2.1".into(), port: 47810, token: "t".into() };
+        let e = listen(cfg.clone(), &hub, &backend).err().expect("bind başarısız olmalı");
+        assert!(bind_error(&cfg, &e).contains("bu PC'nin adresi değil"), "{}", bind_error(&cfg, &e));
     }
 
     #[test]
