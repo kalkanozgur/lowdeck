@@ -8,7 +8,7 @@
 //! - `Hub`: son durumu tutar, yalnız gerçekten değişince istemciye push eder.
 
 // Windows dışında yalnız testler derlenir (CI Linux); gerisi kullanılmaz.
-#![cfg_attr(not(windows), allow(dead_code))]
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
 
 use lowdeck_proto::*;
 use std::io::{BufReader, BufWriter};
