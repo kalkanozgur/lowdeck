@@ -1,5 +1,5 @@
 //! Komut satırı test istemcisi (UI'sız uçtan uca test).
-//! `cargo run -p lowdeck-client --example cli -- 127.0.0.1 47800 dev`
+//! `cargo run -p lowdeck-client --example cli -- 127.0.0.1 47810 dev`
 //! Komutlar: v <0-100> | + | - | m | p | n | b | q
 
 use lowdeck_client::{Client, Config};

@@ -1,5 +1,5 @@
 //! Kullanım: `cargo run -p mock-server -- [port] [token]`
-//! Varsayılan: 47800, token "dev".
+//! Varsayılan: 47810, token "dev".
 //! Tek istemci, tek thread; gerçek ses/medya API'si çağırmaz.
 
 use lowdeck_proto::*;

@@ -1,6 +1,6 @@
 [package]
 name = "lowdeck-proto"
-description = "LowDeck <-> LowMonitor kablo protokolü (paylaşılan tipler + çerçeveleme)"
+description = "LowDeck telefon <-> PC agent kablo protokolü (paylaşılan tipler + çerçeveleme)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

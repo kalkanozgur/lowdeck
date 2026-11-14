@@ -1,8 +1,8 @@
 //! LowDeck kablo protokolü.
 //!
-//! - Taşıma: TCP, tek kalıcı bağlantı (istemci = telefon, sunucu = LowMonitor modülü).
+//! - Taşıma: TCP, tek kalıcı bağlantı (istemci = telefon, sunucu = lowdeck-agent / mock-server).
 //! - Çerçeve: `[u16 LE uzunluk][postcard payload]`, payload <= `MAX_FRAME`.
-//! - Bu crate LowMonitor tarafında da AYNEN kullanılır; tipler tek kaynaktan gelir.
+//! - Telefon, agent ve mock aynı crate'i kullanır; tipler tek kaynaktan gelir.
 //!
 //! Uyumluluk kuralı: enum varyantları yalnızca SONA eklenir (postcard varyant
 //! indeksini kodlar). Kırıcı değişiklikte `PROTO_VERSION` artırılır.
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
 pub const PROTO_VERSION: u16 = 1;
-pub const DEFAULT_PORT: u16 = 47800;
+pub const DEFAULT_PORT: u16 = 47810;
 pub const MAX_FRAME: usize = 4096;
 
 // ---------------- İstemci -> Sunucu ----------------
