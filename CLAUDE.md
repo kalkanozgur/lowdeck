@@ -63,7 +63,7 @@ cargo run -p mock-server -- 47810 dev
 cargo run -p lowdeck-phone --bin lowdeck-desktop
 #   ilk açılışta ⚙ → host=127.0.0.1, port=47810, token=dev
 
-# Gerçek PC sunucusu (Windows; ayar: %APPDATA%\LowDeck\agent.cfg, yoksa LAN IP + rastgele token ile oluşturur)
+# Gerçek PC sunucusu (Windows, tray'de çalışır; ayar: %APPDATA%\LowDeck\agent.cfg, yoksa LAN IP + rastgele token ile oluşturur)
 cargo run --release -p lowdeck-agent
 
 # UI'sız test
@@ -161,7 +161,8 @@ Renderer seçimi (femtovg/skia/software) ölçümle karşılaştırılır.
 ### Faz 4 — `tools/lowdeck-agent` (bu repo; ADR-0002)
 - Kullanıcı oturumunda, `HKCU\…\Run` ile başlar (LowMonitor tray gibi). Servis değil.
 - [x] İskelet + Hub (önbellek, yalnız değişince push, yeni bağlantı eskisini kapatır) + Core Audio + SMTC + VK_MEDIA fallback. Release 238 KB, private 2,5 MB, boşta 0 CPU.
-- [ ] `HKCU\…\Run` otomatik başlatma + konsolsuz çalışma (`windows_subsystem`) + log dosyası.
+- [x] Tray ikonu (yeşil = telefon bağlı, gri = bekliyor; tooltip host:port + telefon adı), menü: telefon ayar satırı, ayar dosyasını aç, **Windows ile başlat** (`HKCU\…\Run`), Çıkış. Konsolsuz (`windows_subsystem`), tek örnek, başlangıç hatası MessageBox.
+- [ ] Log dosyası (şu an println konsolsuzda kayboluyor).
 - [ ] Firewall kuralı (Private + yerel alt ağ); şu an Windows'un ilk dinlemede açtığı izin penceresine kalıyor.
 - [ ] Telefon + agent LAN üzerinden gerçek cihazla gecikme ölçümü (< 50 ms hedefi).
 - Bind: config'teki LAN IP; firewall kuralı yalnız Private profil + yerel alt ağ.

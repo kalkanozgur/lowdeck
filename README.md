@@ -23,7 +23,8 @@ docs/                    PROTOCOL, gereksinimler, devlog, kararlar
 cargo run -p mock-server -- 47810 dev
 cargo run -p lowdeck-phone --bin lowdeck-desktop   # ⚙ → 127.0.0.1 / 47810 / dev
 
-# Gerçek PC sunucusu (mock yerine): ayar %APPDATA%\LowDeck\agent.cfg (ilk açılışta oluşur)
+# Gerçek PC sunucusu (mock yerine), tray'de çalışır: sağ tık → telefon ayarı / Windows ile başlat
+# ayar %APPDATA%\LowDeck\agent.cfg (ilk açılışta LAN IP + rastgele token ile oluşur)
 cargo run --release -p lowdeck-agent
 ```
 APK GitHub Actions'ta derlenir (bkz. `CLAUDE.md` Faz 0).

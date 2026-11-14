@@ -179,9 +179,9 @@ fn session(
     let addr = resolve(&cfg.host, cfg.port).ok_or_else(|| Fail::Retry("adres çözülemedi".into()))?;
     let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)?;
     stream.set_nodelay(true).ok(); // komutlar küçük ve gecikmeye duyarlı
-    stream.set_read_timeout(Some(READ_TIMEOUT)).ok();
-
+    // Timeout okuyan handle'a: Windows'ta try_clone'lu handle SO_RCVTIMEO'yu paylaşmıyor.
     let mut rd = BufReader::new(stream.try_clone()?);
+    rd.get_ref().set_read_timeout(Some(READ_TIMEOUT)).ok();
     {
         let mut w = BufWriter::new(stream);
         write_frame(
