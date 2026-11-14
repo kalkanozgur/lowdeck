@@ -15,7 +15,7 @@ license = "GPL-3.0-only"
 [workspace.dependencies]
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
-slint = { version = "1.17", default-features = false }
+slint = "1.17"
 slint-build = "1.17"
 
 # Telefon için boyut/tüketim odaklı release profili

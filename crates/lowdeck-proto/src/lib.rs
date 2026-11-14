@@ -87,6 +87,8 @@ pub enum FrameError {
     Io(io::Error),
     TooLarge(usize),
     Decode(postcard::Error),
+    /// Karşı taraf çerçeve sınırında bağlantıyı kapattı (temiz kapanış).
+    Closed,
 }
 
 impl From<io::Error> for FrameError {
@@ -101,6 +103,7 @@ impl std::fmt::Display for FrameError {
             FrameError::Io(e) => write!(f, "io: {e}"),
             FrameError::TooLarge(n) => write!(f, "frame too large: {n}"),
             FrameError::Decode(e) => write!(f, "decode: {e}"),
+            FrameError::Closed => write!(f, "bağlantı kapandı"),
         }
     }
 }
@@ -126,7 +129,10 @@ pub fn read_frame<R: Read, T: for<'de> Deserialize<'de>>(
     buf: &mut [u8; MAX_FRAME],
 ) -> Result<T, FrameError> {
     let mut len = [0u8; 2];
-    r.read_exact(&mut len)?;
+    r.read_exact(&mut len).map_err(|e| match e.kind() {
+        io::ErrorKind::UnexpectedEof => FrameError::Closed,
+        _ => FrameError::Io(e),
+    })?;
     let n = u16::from_le_bytes(len) as usize;
     if n > MAX_FRAME {
         return Err(FrameError::TooLarge(n));
@@ -158,6 +164,16 @@ mod tests {
             let got: C2S = read_frame(&mut rd, &mut buf).unwrap();
             assert_eq!(&got, m);
         }
+    }
+
+    #[test]
+    fn eof_at_boundary_is_closed() {
+        let mut buf = [0u8; MAX_FRAME];
+        let r: Result<C2S, _> = read_frame(&mut &[][..], &mut buf);
+        assert!(matches!(r, Err(FrameError::Closed)));
+        // Gövde ortasında kesilme gerçek hatadır.
+        let r: Result<C2S, _> = read_frame(&mut &[5u8, 0, 1][..], &mut buf);
+        assert!(matches!(r, Err(FrameError::Io(_))));
     }
 
     #[test]
