@@ -1,6 +1,6 @@
-# v* tag'i push edilince: "release" ortamı onayı beklenir (GitHub uygulamasından
-# Approve), sonra imzalı APK derlenip GitHub Release'e eklenir. Telefon APK'yı
+# v* tag'i push edilince imzalı APK derlenip GitHub Release'e eklenir. Telefon APK'yı
 # doğrudan Release sayfasından indirip kurar.
+# Onay = tag push'un kendisi: private + GitHub Free'de environment reviewer yok.
 name: release
 
 on:
@@ -13,7 +13,6 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment: release   # Settings → Environments → release → Required reviewers
     steps:
       - uses: actions/checkout@v4
 

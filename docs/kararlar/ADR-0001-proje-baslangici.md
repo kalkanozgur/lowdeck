@@ -12,7 +12,7 @@ Ses codec arızalı eski Mi Note 10 Lite (SD730G, AMOLED), LAN'daki Windows PC i
 | Dil / UI | Rust + Slint (masaüstü ve Android aynı UI) |
 | Taşıma | Tek kalıcı TCP, sunucu push, `[u16 LE][postcard]`, async yok |
 | Yapı | Cargo workspace (crates/, apps/, tools/); skill'in `software/` şablonu kullanılmadı |
-| Build | Android APK yalnızca GitHub Actions'ta; release `release` ortamı onaylı |
+| Build | Android APK yalnızca GitHub Actions'ta; release tag push ile (private + Free: ortam onayı/branch koruması yok) |
 | Kayıt | Aylık devlog `docs/devlog/`, kararlar `docs/kararlar/` |
 
 Ayrıntılı gerekçe: `CLAUDE.md` §2.
