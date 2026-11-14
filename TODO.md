@@ -1,10 +1,11 @@
 # TODO
 ## Şimdi
 - [ ] docs/gereksinimler.md doldur
-- [ ] Faz 0: GitHub repo + secrets + keystore + ilk CI koşusu
+- [x] Faz 0: GitHub repo + ilk CI koşusu
+- [ ] Faz 0: keystore + `ANDROID_KEYSTORE_*` secret'ları (kullanıcı)
 
 ## Sonra
-- [ ] Faz 1 kalanlar: SVG ikonlar, bağlantısızken pasif butonlar, host/port doğrulama
+- [x] Faz 1 kalanlar: SVG ikonlar, bağlantısızken pasif butonlar, host/port doğrulama
 - [ ] Faz 2: Android yaşam döngüsü, ekran açık tutma kararı
 
 ## Fikirler

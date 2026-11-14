@@ -133,10 +133,10 @@ Workflow'lar ilk koşuda doğrulanacak; kırılırsa log okunup düzeltilir (ör
 
 ### Faz 1 — Masaüstünde telefon UI'ı (şu an buradayız)
 - [x] Protokol v1, istemci, mock sunucu, Slint ekranı (iskelet çalışıyor, mock ile uçtan uca test edildi)
-- [ ] Emoji ikonlar yerine gömülü SVG ikonlar (`@image-url("icons/…svg")`). Emoji fontu cihaza göre değişir.
-- [ ] Bağlantı yokken butonları pasifleştir. Kopma/yeniden bağlanma durumlarını UI'da test et (mock'u kapatıp aç).
-- [ ] Ayarlarda port/host doğrulaması.
-- [ ] (Opsiyonel) PC keşfi: LowMonitor'un UDP beacon'ı (`PROTOCOL.md` §5). Manuel IP yeterliyse ertelenir.
+- [x] Emoji ikonlar yerine gömülü SVG ikonlar (`@image-url("icons/…svg")`). Emoji fontu cihaza göre değişir.
+- [x] Bağlantı yokken butonları pasifleştir. Kopma/yeniden bağlanma durumlarını UI'da test et (mock'u kapatıp aç).
+- [x] Ayarlarda port/host doğrulaması.
+- [ ] (Opsiyonel) PC keşfi: agent'ın UDP beacon'ı (`PROTOCOL.md` §5). Manuel IP yeterliyse ertelenir.
 
 ### Faz 2 — Android
 - [ ] APK build. Telefon tamir edilene kadar başka bir Android cihazda ya da emülatörde test.

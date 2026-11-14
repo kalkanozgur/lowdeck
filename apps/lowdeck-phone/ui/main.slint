@@ -12,27 +12,54 @@ global Theme {
     out property <color> dim: #8a8a8a;
     out property <color> accent: #4fc3f7;
     out property <color> warn: #ff7043;
+    out property <color> disabled: #3a3a3a;
     out property <length> radius: 14px;
+}
+
+// İkonlar derlemede gömülür (emoji fontu cihaza göre değişir). Tek renk, colorize ile boyanır.
+global Icons {
+    out property <image> play: @image-url("icons/play.svg");
+    out property <image> pause: @image-url("icons/pause.svg");
+    out property <image> prev: @image-url("icons/prev.svg");
+    out property <image> next: @image-url("icons/next.svg");
+    out property <image> volume: @image-url("icons/volume.svg");
+    out property <image> volume-off: @image-url("icons/volume-off.svg");
+    out property <image> settings: @image-url("icons/settings.svg");
 }
 
 component DeckButton inherits Rectangle {
     in property <string> label;
+    in property <image> icon;
+    in property <length> icon-size: 28px;
     in property <bool> active: false;
+    in property <bool> enabled: true;
     in property <length> font-size: 22px;
     callback clicked();
 
+    // Pasif görünüm renkle; opacity offscreen katman açtırabilir.
+    property <color> fg: !root.enabled ? Theme.disabled : root.active ? Theme.accent : Theme.text;
+
     border-radius: Theme.radius;
     background: ta.pressed ? Theme.surface-pressed : Theme.surface;
-    border-width: root.active ? 2px : 0px;
+    border-width: root.active && root.enabled ? 2px : 0px;
     border-color: Theme.accent;
     min-height: 64px;
 
     ta := TouchArea {
+        enabled: root.enabled;
         clicked => { root.clicked(); }
+    }
+    Image {
+        source: root.icon;
+        colorize: root.fg;
+        width: root.icon-size;
+        height: root.icon-size;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
     }
     Text {
         text: root.label;
-        color: root.active ? Theme.accent : Theme.text;
+        color: root.fg;
         font-size: root.font-size;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -62,13 +89,14 @@ export component MainWindow inherits Window {
     in-out property <string> cfg-host;
     in-out property <string> cfg-port;
     in-out property <string> cfg-token;
+    in-out property <string> cfg-error;
 
     // --- UI -> Rust ---
     callback volume-changed(float);
     callback volume-step(int);
     callback toggle-mute();
     callback media(int); // 0=prev 1=play/pause 2=next 3=stop
-    callback save-settings();
+    callback save-settings() -> bool; // false: doğrulama hatası, cfg-error dolu
 
     VerticalLayout {
         padding: 20px;
@@ -93,10 +121,10 @@ export component MainWindow inherits Window {
             }
             Rectangle { horizontal-stretch: 1; }
             DeckButton {
-                label: "⚙";
+                icon: Icons.settings;
+                icon-size: 22px;
                 width: 56px;
                 min-height: 40px;
-                font-size: 18px;
                 clicked => { root.settings-open = !root.settings-open; }
             }
         }
@@ -128,9 +156,14 @@ export component MainWindow inherits Window {
         }
         HorizontalLayout {
             spacing: 12px;
-            DeckButton { label: "−"; font-size: 32px; clicked => { root.volume-step(-2); } }
-            DeckButton { label: root.muted ? "🔇" : "🔈"; active: root.muted; clicked => { root.toggle-mute(); } }
-            DeckButton { label: "+"; font-size: 32px; clicked => { root.volume-step(2); } }
+            DeckButton { label: "−"; font-size: 32px; enabled: root.connected; clicked => { root.volume-step(-2); } }
+            DeckButton {
+                icon: root.muted ? Icons.volume-off : Icons.volume;
+                active: root.muted;
+                enabled: root.connected;
+                clicked => { root.toggle-mute(); }
+            }
+            DeckButton { label: "+"; font-size: 32px; enabled: root.connected; clicked => { root.volume-step(2); } }
         }
 
         // --- Medya ---
@@ -153,15 +186,16 @@ export component MainWindow inherits Window {
         }
         HorizontalLayout {
             spacing: 12px;
-            DeckButton { label: "⏮"; clicked => { root.media(0); } }
+            DeckButton { icon: Icons.prev; enabled: root.connected; clicked => { root.media(0); } }
             DeckButton {
-                label: root.playing ? "⏸" : "▶";
+                icon: root.playing ? Icons.pause : Icons.play;
+                icon-size: 40px;
                 active: root.playing;
-                font-size: 30px;
+                enabled: root.connected;
                 min-height: 88px;
                 clicked => { root.media(1); }
             }
-            DeckButton { label: "⏭"; clicked => { root.media(2); } }
+            DeckButton { icon: Icons.next; enabled: root.connected; clicked => { root.media(2); } }
         }
 
         Rectangle { vertical-stretch: 1; }
@@ -182,13 +216,18 @@ export component MainWindow inherits Window {
             LineEdit { text <=> root.cfg-port; input-type: number; }
             Text { text: "Token"; color: Theme.dim; font-size: 13px; }
             LineEdit { text <=> root.cfg-token; input-type: password; }
+            if root.cfg-error != "": Text { text: root.cfg-error; color: Theme.warn; font-size: 14px; wrap: word-wrap; }
             HorizontalLayout {
                 spacing: 12px;
-                DeckButton { label: "İptal"; clicked => { root.settings-open = false; } }
+                DeckButton { label: "İptal"; clicked => { root.cfg-error = ""; root.settings-open = false; } }
                 DeckButton {
                     label: "Kaydet";
                     active: true;
-                    clicked => { root.save-settings(); root.settings-open = false; }
+                    clicked => {
+                        if (root.save-settings()) {
+                            root.settings-open = false;
+                        }
+                    }
                 }
             }
         }

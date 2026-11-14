@@ -34,11 +34,56 @@ pub fn load(path: Option<&Path>) -> AppConfig {
     c
 }
 
+/// Ayar ekranı girdisini doğrular. Hata metni doğrudan UI'da gösterilir.
+pub fn parse(host: &str, port: &str, token: &str) -> Result<AppConfig, &'static str> {
+    let host = host.trim();
+    // IPv4, DNS adı ya da IPv6 (köşeli parantezsiz). Boşluk/satır sonu dosyayı bozar.
+    if host.is_empty() {
+        return Err("PC adresi boş");
+    }
+    if host.len() > 253 || !host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':')) {
+        return Err("PC adresi geçersiz (yalnız harf, rakam, . - :)");
+    }
+    let port = match port.trim().parse::<u16>() {
+        Ok(p) if p != 0 => p,
+        _ => return Err("Port 1–65535 arasında olmalı"),
+    };
+    if token.is_empty() || token.contains(['\n', '\r']) {
+        return Err("Token boş ya da satır sonu içeriyor");
+    }
+    Ok(AppConfig { host: host.to_string(), port, token: token.to_string() })
+}
+
 pub fn save(path: Option<&Path>, c: &AppConfig) {
     if let Some(p) = path {
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
         let _ = std::fs::write(p, format!("host={}\nport={}\ntoken={}\n", c.host, c.port, c.token));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse;
+
+    #[test]
+    fn valid() {
+        let c = parse(" 192.168.1.20 ", "47810", "a=b").unwrap();
+        assert_eq!((c.host.as_str(), c.port, c.token.as_str()), ("192.168.1.20", 47810, "a=b"));
+        assert!(parse("pc-salon.local", "1", "t").is_ok());
+        assert!(parse("fe80::1", "65535", "t").is_ok());
+    }
+
+    #[test]
+    fn invalid() {
+        assert!(parse("", "47810", "t").is_err());
+        assert!(parse("192.168.1.20 x", "47810", "t").is_err());
+        assert!(parse("http://pc", "47810", "t").is_err());
+        for p in ["0", "65536", "-1", "", "abc"] {
+            assert!(parse("pc", p, "t").is_err(), "port {p:?}");
+        }
+        assert!(parse("pc", "47810", "").is_err());
+        assert!(parse("pc", "47810", "a\nhost=evil").is_err());
     }
 }
