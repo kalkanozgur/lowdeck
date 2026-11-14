@@ -31,10 +31,14 @@ const WM_CLIENT: u32 = WM_APP + 2;
 const ID_CFG: usize = 1;
 const ID_AUTO: usize = 2;
 const ID_EXIT: usize = 3;
+const ID_RELOAD: usize = 4;
 const RUN_KEY: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Run");
 const RUN_VALUE: &str = "LowDeckAgent";
 // shortcut: sabit 16 px; yüksek DPI'da kabuk ölçekler (bulanık). LowMonitor tray ile aynı sınır.
 const N: usize = 16;
+
+/// Ayar dosyasını yeniden okuyup dinleyiciyi yeniden açar; hata metni kullanıcıya gösterilir.
+pub type Reload = Box<dyn FnMut() -> Result<Info, String>>;
 
 pub struct Info {
     pub bind: String,
@@ -47,6 +51,7 @@ static HWND_: AtomicUsize = AtomicUsize::new(0);
 
 thread_local! {
     static STATE: RefCell<Option<(Info, Arc<Hub>)>> = const { RefCell::new(None) };
+    static RELOAD: RefCell<Option<Reload>> = const { RefCell::new(None) };
     static ICON: Cell<HICON> = const { Cell::new(HICON(std::ptr::null_mut())) };
     static TASKBAR_CREATED: Cell<u32> = const { Cell::new(0) };
 }
@@ -64,7 +69,7 @@ pub fn single_instance() -> bool {
     }
 }
 
-pub fn fatal(text: &str) {
+pub fn error_box(text: &str) {
     let t = wide(text);
     // SAFETY: NUL sonlu dizgeler.
     unsafe { MessageBoxW(None, PCWSTR(t.as_ptr()), w!("LowDeck agent"), MB_ICONERROR) };
@@ -211,6 +216,7 @@ fn menu(hwnd: HWND) {
         let _ = AppendMenuW(m, MF_STRING | MF_GRAYED, 0, PCWSTR(phone.as_ptr()));
         let _ = AppendMenuW(m, MF_SEPARATOR, 0, None);
         let _ = AppendMenuW(m, MF_STRING, ID_CFG, w!("Ayar dosyasını aç"));
+        let _ = AppendMenuW(m, MF_STRING, ID_RELOAD, w!("Ayarı yeniden yükle"));
         let checked = if autostart_enabled() { MF_CHECKED } else { Default::default() };
         let _ = AppendMenuW(m, MF_STRING | checked, ID_AUTO, w!("Windows ile başlat"));
         let _ = AppendMenuW(m, MF_SEPARATOR, 0, None);
@@ -227,6 +233,7 @@ fn menu(hwnd: HWND) {
                 let _ = DestroyWindow(hwnd);
             }
             ID_AUTO => autostart_set(!autostart_enabled()),
+            ID_RELOAD => reload(hwnd),
             ID_CFG => {
                 // Değişiklik yeniden başlatınca geçerli (Çıkış → tekrar aç).
                 let p = wide(&cfg.display().to_string());
@@ -234,6 +241,23 @@ fn menu(hwnd: HWND) {
             }
             _ => {}
         }
+    }
+}
+
+fn reload(hwnd: HWND) {
+    // Kancayı çağırırken STATE ödünç alınmaz: hata kutusu modal döngüsü wndproc'u (notify) çağırabilir.
+    let r = RELOAD.with_borrow_mut(|f| f.as_mut().map(|f| f()));
+    match r {
+        Some(Ok(info)) => {
+            STATE.with_borrow_mut(|s| {
+                if let Some((i, _)) = s {
+                    *i = info;
+                }
+            });
+            notify(hwnd, NIM_MODIFY);
+        }
+        Some(Err(e)) => error_box(&e),
+        None => {}
     }
 }
 
@@ -258,13 +282,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
 }
 
 /// Mesaj döngüsü; "Çıkış" ile döner.
-pub fn run(info: Info, hub: Arc<Hub>) {
+pub fn run(info: Info, hub: Arc<Hub>, reload: Reload) {
     // Hub (client thread'leri) → tray: yalnız mesaj bırakır, UI işi bu thread'de.
     let _ = hub.on_client.set(Box::new(|| {
         // SAFETY: pencere yoksa PostMessage yalnız başarısız döner.
         let _ = unsafe { PostMessageW(Some(HWND(HWND_.load(Ordering::Relaxed) as _)), WM_CLIENT, WPARAM(0), LPARAM(0)) };
     }));
     STATE.set(Some((info, hub)));
+    RELOAD.set(Some(reload));
     // SAFETY: sınıf/pencere bu thread'de oluşturulur ve mesaj döngüsü aynı thread'de.
     unsafe {
         TASKBAR_CREATED.set(RegisterWindowMessageW(w!("TaskbarCreated")));

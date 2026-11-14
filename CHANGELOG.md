@@ -11,6 +11,7 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 - `lowdeck-agent`: gerçek PC sunucusu (Core Audio ses/mute + cihaz değişimi, SMTC medya + parça bilgisi, SMTC yoksa medya tuşu), olay tabanlı push
 - CI: agent için Windows job'u
 - Agent tray ikonu + menü (telefon ayarı, ayar dosyası, Windows ile başlat, çıkış); konsol penceresi yok
+- Agent tray → Ayarı yeniden yükle (yeniden başlatmadan); yanlış `bind` IP'si için açıklayıcı hata
 ### Düzeltildi
 - Karşı taraf bağlantıyı temiz kapatınca `io: failed to fill whole buffer` yerine `bağlantı kapandı` raporlanır
 ### Değişti
