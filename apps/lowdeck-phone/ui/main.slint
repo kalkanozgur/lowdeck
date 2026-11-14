@@ -1,0 +1,196 @@
+// LowDeck ana ekran.
+// Tüketim kuralları: siyah zemin (AMOLED), animasyon/sürekli timer YOK,
+// yalnızca property değişince yeniden çizim.
+
+import { Slider, LineEdit } from "std-widgets.slint";
+
+global Theme {
+    out property <color> bg: #000000;
+    out property <color> surface: #141414;
+    out property <color> surface-pressed: #2a2a2a;
+    out property <color> text: #e6e6e6;
+    out property <color> dim: #8a8a8a;
+    out property <color> accent: #4fc3f7;
+    out property <color> warn: #ff7043;
+    out property <length> radius: 14px;
+}
+
+component DeckButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    in property <length> font-size: 22px;
+    callback clicked();
+
+    border-radius: Theme.radius;
+    background: ta.pressed ? Theme.surface-pressed : Theme.surface;
+    border-width: root.active ? 2px : 0px;
+    border-color: Theme.accent;
+    min-height: 64px;
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    Text {
+        text: root.label;
+        color: root.active ? Theme.accent : Theme.text;
+        font-size: root.font-size;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "LowDeck";
+    background: Theme.bg;
+    preferred-width: 400px;
+    preferred-height: 820px;
+
+    // --- Rust -> UI ---
+    in property <string> status: "Bağlanıyor…";
+    in property <bool> connected: false;
+    in-out property <float> volume: 0;
+    in property <bool> muted: false;
+    in property <string> device: "";
+    in property <bool> has-session: false;
+    in property <bool> playing: false;
+    in property <string> media-app: "";
+    in property <string> track-title: "";
+    in property <string> track-artist: "";
+
+    // --- Ayarlar ---
+    in-out property <bool> settings-open: false;
+    in-out property <string> cfg-host;
+    in-out property <string> cfg-port;
+    in-out property <string> cfg-token;
+
+    // --- UI -> Rust ---
+    callback volume-changed(float);
+    callback volume-step(int);
+    callback toggle-mute();
+    callback media(int); // 0=prev 1=play/pause 2=next 3=stop
+    callback save-settings();
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 16px;
+
+        // Durum satırı
+        HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                width: 12px;
+                height: 12px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 6px;
+                background: root.connected ? #66bb6a : Theme.warn;
+            }
+            Text {
+                text: root.status;
+                color: Theme.dim;
+                font-size: 14px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            DeckButton {
+                label: "⚙";
+                width: 56px;
+                min-height: 40px;
+                font-size: 18px;
+                clicked => { root.settings-open = !root.settings-open; }
+            }
+        }
+
+        // --- Ses ---
+        Text { text: "SES"; color: Theme.dim; font-size: 13px; }
+        Text {
+            text: root.device;
+            color: Theme.dim;
+            font-size: 13px;
+            overflow: elide;
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                text: root.muted ? "SESSİZ" : round(root.volume) + "%";
+                color: root.muted ? Theme.warn : Theme.text;
+                font-size: 48px;
+                horizontal-alignment: center;
+                horizontal-stretch: 1;
+            }
+        }
+        Slider {
+            minimum: 0;
+            maximum: 100;
+            value <=> root.volume;
+            enabled: root.connected;
+            changed(v) => { root.volume-changed(v); }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            DeckButton { label: "−"; font-size: 32px; clicked => { root.volume-step(-2); } }
+            DeckButton { label: root.muted ? "🔇" : "🔈"; active: root.muted; clicked => { root.toggle-mute(); } }
+            DeckButton { label: "+"; font-size: 32px; clicked => { root.volume-step(2); } }
+        }
+
+        // --- Medya ---
+        Rectangle { height: 8px; }
+        Text { text: "MEDYA"; color: Theme.dim; font-size: 13px; }
+        VerticalLayout {
+            spacing: 4px;
+            Text {
+                text: root.has-session ? root.track-title : "Oynatıcı yok";
+                color: Theme.text;
+                font-size: 20px;
+                overflow: elide;
+            }
+            Text {
+                text: root.has-session ? root.track-artist + "  ·  " + root.media-app : "";
+                color: Theme.dim;
+                font-size: 14px;
+                overflow: elide;
+            }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            DeckButton { label: "⏮"; clicked => { root.media(0); } }
+            DeckButton {
+                label: root.playing ? "⏸" : "▶";
+                active: root.playing;
+                font-size: 30px;
+                min-height: 88px;
+                clicked => { root.media(1); }
+            }
+            DeckButton { label: "⏭"; clicked => { root.media(2); } }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+    }
+
+    // --- Ayarlar paneli (üstte) ---
+    if root.settings-open: Rectangle {
+        background: #000000f0;
+        TouchArea { } // alttakine tıklamayı engelle
+        VerticalLayout {
+            padding: 24px;
+            spacing: 12px;
+            alignment: start;
+            Text { text: "Bağlantı"; color: Theme.text; font-size: 22px; }
+            Text { text: "PC adresi (IP ya da ad)"; color: Theme.dim; font-size: 13px; }
+            LineEdit { text <=> root.cfg-host; placeholder-text: "192.168.1.x"; }
+            Text { text: "Port"; color: Theme.dim; font-size: 13px; }
+            LineEdit { text <=> root.cfg-port; input-type: number; }
+            Text { text: "Token"; color: Theme.dim; font-size: 13px; }
+            LineEdit { text <=> root.cfg-token; input-type: password; }
+            HorizontalLayout {
+                spacing: 12px;
+                DeckButton { label: "İptal"; clicked => { root.settings-open = false; } }
+                DeckButton {
+                    label: "Kaydet";
+                    active: true;
+                    clicked => { root.save-settings(); root.settings-open = false; }
+                }
+            }
+        }
+    }
+}

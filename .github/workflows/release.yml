@@ -1,0 +1,45 @@
+# v* tag'i push edilince: "release" ortamı onayı beklenir (GitHub uygulamasından
+# Approve), sonra imzalı APK derlenip GitHub Release'e eklenir. Telefon APK'yı
+# doğrudan Release sayfasından indirip kurar.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release   # Settings → Environments → release → Required reviewers
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sürüm tutarlılığı (tag == Cargo.toml version)
+        run: |
+          CARGO_VER=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          [ "$CARGO_VER" = "$TAG_VER" ] || { echo "::error::tag $TAG_VER != Cargo.toml $CARGO_VER"; exit 1; }
+
+      - name: Keystore secret'ı var mı
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          [ -n "$KS" ] || { echo "::error::ANDROID_KEYSTORE_B64 secret'ı tanımlı değil"; exit 1; }
+
+      - id: build
+        uses: ./.github/actions/build-apk
+        with:
+          keystore_b64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          keystore_password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          OUT="lowdeck-${GITHUB_REF_NAME}.apk"
+          cp "${{ steps.build.outputs.apk }}" "$OUT"
+          sha256sum "$OUT" > "$OUT.sha256"
+          gh release create "$GITHUB_REF_NAME" "$OUT" "$OUT.sha256" --generate-notes --title "LowDeck $GITHUB_REF_NAME"

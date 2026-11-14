@@ -1,0 +1,10 @@
+[package]
+name = "mock-server"
+description = "LowMonitor modülü hazır olana kadar sahte sunucu: komutları loglar, sahte durum push eder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+lowdeck-proto = { path = "../../crates/lowdeck-proto" }

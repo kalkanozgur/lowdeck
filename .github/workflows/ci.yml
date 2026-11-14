@@ -1,0 +1,46 @@
+# Her PR ve main push'unda: test + clippy + imzalı APK (artifact olarak).
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Slint masaüstü bağımlılıkları
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libfontconfig1-dev libxkbcommon-dev
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace -- -D warnings
+
+  apk:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: build
+        uses: ./.github/actions/build-apk
+        with:
+          # Secret tanımlıysa kalıcı anahtarla imzalar -> telefonda üstüne güncelleme olur
+          keystore_b64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          keystore_password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowdeck-${{ github.sha }}
+          path: ${{ steps.build.outputs.apk }}
+          retention-days: 14

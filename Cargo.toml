@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/lowdeck-proto",
+    "crates/lowdeck-client",
+    "apps/lowdeck-phone",
+    "tools/mock-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+
+[workspace.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+postcard = { version = "1", default-features = false, features = ["alloc"] }
+slint = { version = "1.17", default-features = false }
+slint-build = "1.17"
+
+# Telefon için boyut/tüketim odaklı release profili
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
