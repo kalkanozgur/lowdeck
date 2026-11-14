@@ -1,7 +1,8 @@
 //! LowDeck PC sunucusu (ADR-0002). Kullanıcı oturumunda çalışır; servis değil.
 //!
 //! Thread modeli (async yok, polling yok):
-//! - main: `accept`. Yeni bağlantı eskisinin yerine geçer (telefon tek istemci).
+//! - main: tray mesaj döngüsü (`tray.rs`), olay yoksa uyur.
+//! - accept: yeni bağlantı eskisinin yerine geçer (telefon tek istemci).
 //! - client: telefondan okur, komutları audio/media thread'lerine kanalla iletir.
 //! - audio / media (`win.rs`): COM/WinRT nesnelerinin sahibi, `recv`'de bloklu;
 //!   Windows olayları (volume callback, SMTC event) kanala mesaj bırakır.
@@ -9,6 +10,8 @@
 
 // Windows dışında yalnız testler derlenir (CI Linux); gerisi kullanılmaz.
 #![cfg_attr(not(windows), allow(dead_code, unused_imports))]
+// Konsol penceresi yok; arayüz tray ikonu (tray.rs).
+#![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
 
 use lowdeck_proto::*;
 use std::io::{BufReader, BufWriter};
@@ -18,9 +21,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[cfg(windows)]
+mod tray;
+#[cfg(windows)]
 mod win;
 
+#[cfg(not(test))]
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const HELLO_TIMEOUT: Duration = Duration::from_millis(300);
 /// İstemci 25 s'de bir ping atar; bu sürede hiçbir şey gelmezse bağlantı ölü.
 const READ_TIMEOUT: Duration = Duration::from_secs(90);
 /// Yavaş/kaybolmuş istemci Hub kilidini bu süreden uzun tutamaz.
@@ -29,38 +37,69 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 // ---------------- Hub ----------------
 
 #[derive(Default)]
-pub struct Hub(Mutex<HubInner>);
+pub struct Hub {
+    inner: Mutex<HubInner>,
+    /// Bağlı telefon değişince çağrılır (tray ikonu). Kilit dışında çağrılır.
+    on_client: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>>,
+}
+
+struct Client {
+    id: u64,
+    name: String,
+    w: BufWriter<TcpStream>,
+}
 
 #[derive(Default)]
 struct HubInner {
     audio: AudioState,
     media: MediaState,
     next_id: u64,
-    client: Option<(u64, BufWriter<TcpStream>)>,
+    client: Option<Client>,
 }
 
 impl HubInner {
-    fn send(&mut self, msg: &S2C) {
-        if let Some((_, w)) = &mut self.client {
-            if write_frame(w, msg).is_err() {
-                let _ = w.get_ref().shutdown(Shutdown::Both);
+    /// false: yazma hatası, istemci düşürüldü.
+    fn send(&mut self, msg: &S2C) -> bool {
+        if let Some(c) = &mut self.client {
+            if write_frame(&mut c.w, msg).is_err() {
+                let _ = c.w.get_ref().shutdown(Shutdown::Both);
                 self.client = None;
+                return false;
             }
         }
+        true
     }
 }
 
 impl Hub {
     fn lock(&self) -> std::sync::MutexGuard<'_, HubInner> {
         // Zehirlenmiş kilit: içerik yalnız önbellek + soket, kullanmaya devam etmek güvenli.
-        self.0.lock().unwrap_or_else(|e| e.into_inner())
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn changed(&self) {
+        if let Some(f) = self.on_client.get() {
+            f();
+        }
+    }
+
+    pub fn client_name(&self) -> Option<String> {
+        self.lock().client.as_ref().map(|c| c.name.clone())
+    }
+
+    fn push(&self, msg: S2C) {
+        let ok = self.lock().send(&msg);
+        if !ok {
+            self.changed();
+        }
     }
 
     pub fn set_audio(&self, a: AudioState) {
         let mut g = self.lock();
         if g.audio != a {
             g.audio = a.clone();
-            g.send(&S2C::Audio(a));
+            drop(g);
+            self.push(S2C::Audio(a));
         }
     }
 
@@ -74,13 +113,14 @@ impl Hub {
         let mut g = self.lock();
         if g.media != m {
             g.media = m.clone();
-            g.send(&S2C::Media(m));
+            drop(g);
+            self.push(S2C::Media(m));
         }
     }
 
     /// Welcome + tam durumu kilit altında yazar: arada push kaçmaz/araya girmez.
     /// Önceki istemci kapatılır. Dönen id ile `reply`/`detach` yapılır.
-    fn attach(&self, mut w: BufWriter<TcpStream>) -> Option<u64> {
+    fn attach(&self, name: String, mut w: BufWriter<TcpStream>) -> Option<u64> {
         let mut g = self.lock();
         let hello = [
             S2C::Welcome { proto: PROTO_VERSION, server: server_name() },
@@ -90,26 +130,31 @@ impl Hub {
         for m in &hello {
             write_frame(&mut w, m).ok()?;
         }
-        if let Some((_, old)) = g.client.take() {
-            let _ = old.get_ref().shutdown(Shutdown::Both);
+        if let Some(old) = g.client.take() {
+            let _ = old.w.get_ref().shutdown(Shutdown::Both);
         }
         g.next_id += 1;
         let id = g.next_id;
-        g.client = Some((id, w));
+        g.client = Some(Client { id, name, w });
+        drop(g);
+        self.changed();
         Some(id)
     }
 
     fn reply(&self, id: u64, msg: &S2C) {
         let mut g = self.lock();
-        if g.client.as_ref().is_some_and(|(cid, _)| *cid == id) {
-            g.send(msg);
+        if g.client.as_ref().is_some_and(|c| c.id == id) && !g.send(msg) {
+            drop(g);
+            self.changed();
         }
     }
 
     fn detach(&self, id: u64) {
         let mut g = self.lock();
-        if g.client.as_ref().is_some_and(|(cid, _)| *cid == id) {
+        if g.client.as_ref().is_some_and(|c| c.id == id) {
             g.client = None;
+            drop(g);
+            self.changed();
         }
     }
 }
@@ -130,8 +175,9 @@ fn handle(stream: TcpStream, token: &str, hub: &Hub, backend: &dyn Backend) -> R
     let peer = stream.peer_addr().ok();
     stream.set_nodelay(true).ok();
     stream.set_write_timeout(Some(WRITE_TIMEOUT)).ok();
-    stream.set_read_timeout(Some(HELLO_TIMEOUT)).ok();
+    // Timeout'lar okuyan handle'a: Windows'ta try_clone'lu handle SO_RCVTIMEO'yu paylaşmıyor.
     let mut rd = BufReader::new(stream.try_clone()?);
+    rd.get_ref().set_read_timeout(Some(HELLO_TIMEOUT)).ok();
     let mut buf = [0u8; MAX_FRAME];
 
     match read_frame::<_, C2S>(&mut rd, &mut buf)? {
@@ -150,14 +196,23 @@ fn handle(stream: TcpStream, token: &str, hub: &Hub, backend: &dyn Backend) -> R
                 return Ok(());
             }
             println!("+ bağlandı: {name} {peer:?}");
+            rd.get_ref().set_read_timeout(Some(READ_TIMEOUT)).ok();
+            let Some(id) = hub.attach(name, BufWriter::new(stream)) else { return Ok(()) };
+            session(&mut rd, &mut buf, id, hub, backend)
         }
-        _ => return Ok(()),
+        _ => Ok(()),
     }
+}
 
-    stream.set_read_timeout(Some(READ_TIMEOUT)).ok();
-    let Some(id) = hub.attach(BufWriter::new(stream)) else { return Ok(()) };
+fn session(
+    rd: &mut BufReader<TcpStream>,
+    buf: &mut [u8; MAX_FRAME],
+    id: u64,
+    hub: &Hub,
+    backend: &dyn Backend,
+) -> Result<(), FrameError> {
     let r = (|| loop {
-        match read_frame::<_, C2S>(&mut rd, &mut buf)? {
+        match read_frame::<_, C2S>(rd, buf)? {
             C2S::Ping(n) => hub.reply(id, &S2C::Pong(n)),
             // Sonuç Windows olayı ile (gerçekten değişirse) push edilir.
             C2S::Audio(cmd) => backend.audio(cmd),
@@ -229,18 +284,35 @@ fn random_token() -> String {
 // ---------------- main ----------------
 
 #[cfg(windows)]
-fn main() -> std::io::Result<()> {
+fn main() {
+    if !tray::single_instance() {
+        return;
+    }
     let path = config_path();
-    let cfg = load_or_create(&path)?;
+    // 0.0.0.0 değil: yalnız seçilen arayüz (ADR-0002).
+    let (cfg, listener) = match load_or_create(&path)
+        .and_then(|c| TcpListener::bind((c.bind.as_str(), c.port)).map(|l| (c, l)))
+    {
+        Ok(v) => v,
+        // Konsol yok: başlangıç hatası kullanıcıya kutuyla gösterilir.
+        Err(e) => return tray::fatal(&format!("Başlatılamadı: {e}\n\nAyar: {}", path.display())),
+    };
     let hub = Arc::new(Hub::default());
     let backend: Arc<dyn Backend> = Arc::new(win::start(hub.clone()));
 
-    // 0.0.0.0 değil: yalnız seçilen arayüz (ADR-0002).
-    let listener = TcpListener::bind((cfg.bind.as_str(), cfg.port))?;
-    println!("lowdeck-agent: {}:{}  ayar: {}", cfg.bind, cfg.port, path.display());
-    println!("telefon ⚙ → host={} port={} token={}", cfg.bind, cfg.port, cfg.token);
-
+    let info = tray::Info { bind: cfg.bind.clone(), port: cfg.port, token: cfg.token.clone(), cfg_path: path };
     let token: Arc<str> = cfg.token.into();
+    {
+        let hub = hub.clone();
+        std::thread::Builder::new()
+            .name("lowdeck-accept".into())
+            .spawn(move || accept_loop(listener, token, hub, backend))
+            .expect("accept thread");
+    }
+    tray::run(info, hub); // mesaj döngüsü; Çıkış ile döner
+}
+
+fn accept_loop(listener: TcpListener, token: Arc<str>, hub: Arc<Hub>, backend: Arc<dyn Backend>) {
     for conn in listener.incoming() {
         let Ok(s) = conn else { continue };
         let (hub, backend, token) = (hub.clone(), backend.clone(), token.clone());
@@ -253,7 +325,6 @@ fn main() -> std::io::Result<()> {
                 }
             });
     }
-    Ok(())
 }
 
 #[cfg(not(windows))]
@@ -308,6 +379,28 @@ mod tests {
         let mut b = connect();
         assert!(matches!(read_frame(&mut b, &mut buf).unwrap(), S2C::Welcome { .. }));
         assert!(matches!(read_frame::<_, S2C>(&mut a, &mut buf), Err(FrameError::Closed | FrameError::Io(_))));
+    }
+
+    /// Hello zaman aşımı oturuma taşmamalı (Windows'ta try_clone'lu handle timeout'u paylaşmıyor).
+    #[test]
+    fn idle_session_survives_hello_timeout() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let hub = Hub::default();
+            let _ = handle(l.accept().unwrap().0, "t", &hub, &Null);
+        });
+        let s = TcpStream::connect(addr).unwrap();
+        let mut w = BufWriter::new(s.try_clone().unwrap());
+        write_frame(&mut w, &C2S::Hello { proto: PROTO_VERSION, token: "t".into(), name: "x".into() }).unwrap();
+        let mut rd = BufReader::new(s);
+        let mut buf = [0u8; MAX_FRAME];
+        for _ in 0..3 {
+            read_frame::<_, S2C>(&mut rd, &mut buf).unwrap(); // Welcome, Audio, Media
+        }
+        std::thread::sleep(HELLO_TIMEOUT * 2);
+        write_frame(&mut w, &C2S::Ping(7)).unwrap();
+        assert_eq!(read_frame::<_, S2C>(&mut rd, &mut buf).unwrap(), S2C::Pong(7));
     }
 
     #[test]

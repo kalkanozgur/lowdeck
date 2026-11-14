@@ -10,8 +10,10 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 - Android: önde iken ekran açık, 2 dk dokunulmazsa siyah perde; arka plana geçince bağlantı kapanır, öne gelince açılır
 - `lowdeck-agent`: gerçek PC sunucusu (Core Audio ses/mute + cihaz değişimi, SMTC medya + parça bilgisi, SMTC yoksa medya tuşu), olay tabanlı push
 - CI: agent için Windows job'u
+- Agent tray ikonu + menü (telefon ayarı, ayar dosyası, Windows ile başlat, çıkış); konsol penceresi yok
 ### Düzeltildi
 - Karşı taraf bağlantıyı temiz kapatınca `io: failed to fill whole buffer` yerine `bağlantı kapandı` raporlanır
 ### Değişti
 - Varsayılan port 47800 → **47810** (LowMonitor `lowmon-net` ile çakışma). Kayıtlı ayardaki port elle güncellenmeli.
 - İstemci: connect sırasında durdurulan client zombi bağlantı bırakmıyor; eski client'ın olayları UI'ı ezmiyor
+- Agent: oturum Hello zaman aşımıyla (5 s) kopuyordu — Windows'ta `try_clone`'lu handle `SO_RCVTIMEO` paylaşmıyor; timeout okuma handle'ına. İstemcide aynı desen düzeltildi.
