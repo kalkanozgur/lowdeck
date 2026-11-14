@@ -13,6 +13,7 @@ crates/lowdeck-proto     protokol tipleri + çerçeveleme
 crates/lowdeck-client    UI'dan bağımsız istemci
 apps/lowdeck-phone       Slint uygulaması (Android + masaüstü)
 tools/mock-server        sahte PC sunucusu
+tools/lowdeck-agent      gerçek PC sunucusu (Windows: Core Audio + SMTC)
 docs/                    PROTOCOL, gereksinimler, devlog, kararlar
 .github/                 CI (APK artifact) + release
 ```
@@ -21,5 +22,8 @@ docs/                    PROTOCOL, gereksinimler, devlog, kararlar
 ```powershell
 cargo run -p mock-server -- 47810 dev
 cargo run -p lowdeck-phone --bin lowdeck-desktop   # ⚙ → 127.0.0.1 / 47810 / dev
+
+# Gerçek PC sunucusu (mock yerine): ayar %APPDATA%\LowDeck\agent.cfg (ilk açılışta oluşur)
+cargo run --release -p lowdeck-agent
 ```
 APK GitHub Actions'ta derlenir (bkz. `CLAUDE.md` Faz 0).

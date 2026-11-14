@@ -41,7 +41,7 @@ lowdeck/
 │  ├─ ui/main.slint           # tek ekran + ayar paneli
 │  └─ src/{lib.rs,main.rs,config.rs}   # lib = Android cdylib, main = masaüstü
 ├─ tools/mock-server/         # sahte sunucu (agent gelene kadar)
-├─ tools/lowdeck-agent/       # (Faz 4) gerçek PC sunucusu: Core Audio + SMTC
+├─ tools/lowdeck-agent/       # gerçek PC sunucusu: Core Audio + SMTC (src/win.rs)
 ├─ .github/                   # CI (test+APK) ve tag tetikli release workflow'ları
 ├─ README.md · CHANGELOG.md · TODO.md
 └─ docs/
@@ -62,6 +62,9 @@ cargo clippy --workspace -- -D warnings
 cargo run -p mock-server -- 47810 dev
 cargo run -p lowdeck-phone --bin lowdeck-desktop
 #   ilk açılışta ⚙ → host=127.0.0.1, port=47810, token=dev
+
+# Gerçek PC sunucusu (Windows; ayar: %APPDATA%\LowDeck\agent.cfg, yoksa LAN IP + rastgele token ile oluşturur)
+cargo run --release -p lowdeck-agent
 
 # UI'sız test
 cargo run -p lowdeck-client --example cli -- 127.0.0.1 47810 dev
@@ -157,7 +160,10 @@ Renderer seçimi (femtovg/skia/software) ölçümle karşılaştırılır.
 
 ### Faz 4 — `tools/lowdeck-agent` (bu repo; ADR-0002)
 - Kullanıcı oturumunda, `HKCU\…\Run` ile başlar (LowMonitor tray gibi). Servis değil.
-- `mock-server` iskeleti + gerçek arka uç; `lowdeck-proto` doğrudan.
+- [x] İskelet + Hub (önbellek, yalnız değişince push, yeni bağlantı eskisini kapatır) + Core Audio + SMTC + VK_MEDIA fallback. Release 238 KB, private 2,5 MB, boşta 0 CPU.
+- [ ] `HKCU\…\Run` otomatik başlatma + konsolsuz çalışma (`windows_subsystem`) + log dosyası.
+- [ ] Firewall kuralı (Private + yerel alt ağ); şu an Windows'un ilk dinlemede açtığı izin penceresine kalıyor.
+- [ ] Telefon + agent LAN üzerinden gerçek cihazla gecikme ölçümü (< 50 ms hedefi).
 - Bind: config'teki LAN IP; firewall kuralı yalnız Private profil + yerel alt ağ.
 - LowMonitor konvansiyonları: `// SAFETY:` yorumu, async yok, Win32 için `windows-sys`. SMTC WinRT olduğu için `windows` crate gerekir (`windows-sys` WinRT içermez); Faz 4 başında exe boyutu ölçülüp sorulur.
 - Ses: Windows Core Audio — `IAudioEndpointVolume` (seviye/mute) + `IAudioEndpointVolumeCallback` (**push için değişiklik bildirimi**, polling yok) + `IMMNotificationClient` (varsayılan cihaz değişimi). `windows` crate.

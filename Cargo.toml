@@ -5,6 +5,7 @@ members = [
     "crates/lowdeck-client",
     "apps/lowdeck-phone",
     "tools/mock-server",
+    "tools/lowdeck-agent",
 ]
 
 [workspace.package]
