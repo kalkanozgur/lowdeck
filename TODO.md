@@ -6,7 +6,8 @@
 
 ## Sonra
 - [x] Faz 1 kalanlar: SVG ikonlar, bağlantısızken pasif butonlar, host/port doğrulama
-- [ ] Faz 2: Android yaşam döngüsü, ekran açık tutma kararı
+- [x] Faz 2: Android yaşam döngüsü, ekran açık tutma (KEEP_SCREEN_ON + boşta siyah perde)
+- [ ] Faz 2: cihazda/emülatörde doğrulama (Pause'da soket kapanıyor mu, Wi-Fi uyku)
 
 ## Fikirler
 - UDP beacon ile PC keşfi (PROTOCOL.md §5)

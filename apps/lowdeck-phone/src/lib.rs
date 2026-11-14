@@ -12,6 +12,7 @@ use lowdeck_proto::{AudioCmd, MediaCmd, S2C};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -21,11 +22,36 @@ const VOLUME_THROTTLE: Duration = Duration::from_millis(50);
 /// (slider'ın geri zıplamasını önler).
 const LOCAL_ECHO_GUARD: Duration = Duration::from_millis(400);
 
+/// Bu süre dokunulmazsa siyah perde iner.
+const BLACKOUT_AFTER: Duration = Duration::from_secs(120);
+
+/// Yaşam döngüsü kancası (true = öne geldi). `run` kurar, Android olay dinleyicisi çağırır.
+type ActiveHook = Box<dyn Fn(bool)>;
+
+thread_local! {
+    static ON_ACTIVE: RefCell<Option<ActiveHook>> = const { RefCell::new(None) };
+}
+
 #[cfg(target_os = "android")]
 #[no_mangle]
 fn android_main(app: slint::android::AndroidApp) {
+    use slint::android::android_activity::{MainEvent, PollEvent, WindowManagerFlags};
     let data_dir = app.internal_data_path();
-    slint::android::init(app).expect("slint android init");
+    // Önde iken ekran açık; boşta siyah perde UI'da. JNI gerekmez.
+    app.set_window_flags(WindowManagerFlags::KEEP_SCREEN_ON, WindowManagerFlags::empty());
+    slint::android::init_with_event_listener(app, |ev| {
+        let active = match ev {
+            PollEvent::Main(MainEvent::Pause) => false,
+            PollEvent::Main(MainEvent::Resume { .. }) => true,
+            _ => return,
+        };
+        ON_ACTIVE.with(|h| {
+            if let Some(f) = h.borrow().as_ref() {
+                f(active)
+            }
+        });
+    })
+    .expect("slint android init");
     run(data_dir, "toco").expect("run");
 }
 
@@ -39,6 +65,9 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
     ui.set_cfg_token(cfg.token.clone().into());
 
     let client: Rc<RefCell<Option<Client>>> = Rc::new(RefCell::new(None));
+    let current = Rc::new(RefCell::new(cfg));
+    // Her (yeniden) bağlanma/duraklatmada artar; eski client'ın kuyruktaki olayları atılır.
+    let generation = Arc::new(AtomicU32::new(0));
     let last_local_edit = Arc::new(Mutex::new(Instant::now() - LOCAL_ECHO_GUARD));
     let name = device_name.to_string();
 
@@ -47,8 +76,10 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
         let client = client.clone();
         let weak = ui.as_weak();
         let last_local_edit = last_local_edit.clone();
+        let generation = generation.clone();
         move |c: &AppConfig| {
             client.borrow_mut().take();
+            let my_gen = generation.fetch_add(1, Ordering::Relaxed) + 1;
             let Some(ui) = weak.upgrade() else { return };
             if c.host.is_empty() {
                 ui.set_status("PC adresi ayarlanmadı".into());
@@ -57,17 +88,71 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
             }
             let weak = weak.clone();
             let guard = last_local_edit.clone();
+            let generation = generation.clone();
             *client.borrow_mut() = Some(Client::start(
                 Config { host: c.host.clone(), port: c.port, token: c.token.clone(), name: name.clone() },
                 move |ev| {
                     let guard = guard.clone();
-                    let _ = weak.upgrade_in_event_loop(move |ui| apply(&ui, ev, &guard));
+                    let generation = generation.clone();
+                    let _ = weak.upgrade_in_event_loop(move |ui| {
+                        if generation.load(Ordering::Relaxed) == my_gen {
+                            apply(&ui, ev, &guard);
+                        }
+                    });
                 },
             ));
         }
     };
     let connect = Rc::new(connect);
-    connect(&cfg);
+    connect(&current.borrow());
+
+    // --- Boşta siyah perde: tek-atışlık timer, her dokunuşta yeniden kurulur ---
+    let idle = Rc::new(slint::Timer::default());
+    {
+        let weak = ui.as_weak();
+        idle.start(slint::TimerMode::SingleShot, BLACKOUT_AFTER, move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_blackout(true);
+            }
+        });
+    }
+    let poke = {
+        let idle = idle.clone();
+        let weak = ui.as_weak();
+        move || {
+            idle.restart();
+            if let Some(ui) = weak.upgrade() {
+                ui.set_blackout(false);
+            }
+        }
+    };
+    ui.global::<Activity>().on_poke(poke.clone());
+
+    // --- Yaşam döngüsü: arka planda bağlantı yok (sıfır ağ trafiği) ---
+    {
+        let client = client.clone();
+        let connect = connect.clone();
+        let current = current.clone();
+        let generation = generation.clone();
+        let weak = ui.as_weak();
+        ON_ACTIVE.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move |active| {
+                if active {
+                    poke();
+                    if client.borrow().is_none() {
+                        connect(&current.borrow());
+                    }
+                } else {
+                    client.borrow_mut().take();
+                    generation.fetch_add(1, Ordering::Relaxed);
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_connected(false);
+                        ui.set_status("Duraklatıldı".into());
+                    }
+                }
+            }))
+        });
+    }
 
     // --- Ses: throttle'lı mutlak seviye ---
     {
@@ -144,6 +229,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
     {
         let weak = ui.as_weak();
         let connect = connect.clone();
+        let current = current.clone();
         ui.on_save_settings(move || {
             let Some(ui) = weak.upgrade() else { return false };
             match config::parse(&ui.get_cfg_host(), &ui.get_cfg_port(), &ui.get_cfg_token()) {
@@ -151,6 +237,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                     ui.set_cfg_error("".into());
                     config::save(cfg_path.as_deref(), &c);
                     connect(&c);
+                    *current.borrow_mut() = c;
                     true
                 }
                 Err(e) => {
@@ -161,7 +248,10 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
         });
     }
 
-    ui.run()
+    let r = ui.run();
+    // Kanca ui/client'ı tutuyor; event loop bitince bırak (Android'de android_main tekrar çağrılabilir).
+    ON_ACTIVE.with(|h| h.borrow_mut().take());
+    r
 }
 
 /// Ağ olayını UI'a uygular (event loop thread'inde çalışır).

@@ -76,7 +76,7 @@ adb install -r lowdeck-*.apk        # telefona kur (USB hata ayıklama açıksa)
 ## 5. Kodlama kuralları
 ### Tüketim (öncelik 1)
 - **Sürekli Timer, animasyon, polling yasak.** Yeniden çizim yalnızca property değişince olur. Yeni periyodik iş eklemeden önce kullanıcıya sor.
-- Tek periyodik uyanma: istemcideki Ping (25 s). Ölü bağlantı tespiti `READ_TIMEOUT` (60 s) ile.
+- Tek periyodik uyanma: istemcideki Ping (25 s). İstisna: boşta perde timer'ı tek-atışlık, dokunuşta yeniden kurulur (periyodik değil). Ölü bağlantı tespiti `READ_TIMEOUT` (60 s) ile.
 - Arka plan rengi saf siyah (`#000000`): AMOLED'de siyah piksel güç harcamaz. Büyük beyaz/açık alan kullanılmaz.
 - Slider gibi sürekli girdiler throttle'lanır (şu an 50 ms ≈ 20 Hz). Son değer tek seferlik timer'la mutlaka gönderilir.
 - Okuma döngüsünde tahsis yok (çerçeve buffer'ı yeniden kullanılır). Yeni bağımlılık eklemeden önce boyut ve gerekçe söylenir.
@@ -140,8 +140,8 @@ Workflow'lar ilk koşuda doğrulanacak; kırılırsa log okunup düzeltilir (ör
 
 ### Faz 2 — Android
 - [ ] APK build. Telefon tamir edilene kadar başka bir Android cihazda ya da emülatörde test.
-- [ ] Ekran açık tutma: `FLAG_KEEP_SCREEN_ON` (JNI ile `Window.addFlags`) ya da ayarlanabilir parlaklık/zaman aşımı. Kullanıcıya sor.
-- [ ] Yaşam döngüsü: uygulama arka plana gidince (`PollEvent::Pause`) bağlantıyı kapat, öne gelince aç. Arka planda sıfır ağ trafiği.
+- [x] Ekran açık tutma: önde iken `KEEP_SCREEN_ON` (`AndroidApp::set_window_flags`, JNI yok) + 120 s dokunulmazsa tam siyah perde (tek-atışlık `Timer::restart`). Karar 2026-11-14.
+- [x] Yaşam döngüsü: `init_with_event_listener` → `MainEvent::Pause` client drop, `Resume` yeniden bağlan. Cihazda ölçülecek.
 - [ ] Wi-Fi uyku politikası ve yeniden bağlanma davranışını ölç.
 
 ### Faz 3 — Tüketim ölçümü ve ayar
