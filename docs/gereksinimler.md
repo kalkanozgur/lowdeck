@@ -11,7 +11,7 @@ Eski Android telefonu, aynı LAN'daki Windows PC için düşük tüketimli ses/m
 | F3 | Çalan parça bilgisi (başlık, sanatçı) | 1 |
 | F4 | Bağlantı kopunca otomatik yeniden bağlanma, durum UI'da | 1 |
 | F5 | Tuş kilidi | 5 (TBD) |
-| F6 | LowMonitor metrikleri | TBD |
+| F6 | LowMonitor metrikleri (ADR-0002 seçenek a/b) | TBD |
 
 ## Elektriksel / tüketim
 | Metrik | Hedef |
@@ -31,6 +31,6 @@ Eski Android telefonu, aynı LAN'daki Windows PC için düşük tüketimli ses/m
 - İç mekân, masa üstü. Sürekli şarjda pil sıcaklığı: TBD
 
 ## Kabul kriterleri
-- F1–F4 mock sunucuya ve LowMonitor modülüne karşı çalışır.
+- F1–F4 mock sunucuya ve lowdeck-agent'a karşı çalışır.
 - Tüketim tablosundaki ölçümler `adb` ile alınıp devlog'a yazılmıştır.
 - Ses donanımı gerektirmez (telefonun ses codec'i arızalı).

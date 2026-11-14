@@ -19,7 +19,7 @@ docs/                    PROTOCOL, gereksinimler, devlog, kararlar
 
 ## Hızlı başlangıç
 ```powershell
-cargo run -p mock-server -- 47800 dev
-cargo run -p lowdeck-phone --bin lowdeck-desktop   # ⚙ → 127.0.0.1 / 47800 / dev
+cargo run -p mock-server -- 47810 dev
+cargo run -p lowdeck-phone --bin lowdeck-desktop   # ⚙ → 127.0.0.1 / 47810 / dev
 ```
 APK GitHub Actions'ta derlenir (bkz. `CLAUDE.md` Faz 0).

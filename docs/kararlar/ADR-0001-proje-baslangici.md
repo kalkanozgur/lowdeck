@@ -3,7 +3,7 @@
 - Durum: Kabul
 
 ## Bağlam
-Ses codec arızalı eski Mi Note 10 Lite (SD730G, AMOLED), LAN'daki Windows PC için ses/medya kontrol paneli olacak. Öncelik minimum tüketim. PC sunucusu ileride LowMonitor (Rust) modülü. Android araç zinciri lokalde yok.
+Ses codec arızalı eski Mi Note 10 Lite (SD730G, AMOLED), LAN'daki Windows PC için ses/medya kontrol paneli olacak. Öncelik minimum tüketim. PC sunucusu ileride LowMonitor (Rust) modülü (→ değişti: [ADR-0002](ADR-0002-lowdeck-agent.md), ayrı lowdeck-agent). Android araç zinciri lokalde yok.
 
 ## Karar
 | Konu | Seçim |

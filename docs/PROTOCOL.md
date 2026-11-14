@@ -5,8 +5,9 @@ Kaynak: `crates/lowdeck-proto/src/lib.rs`. Bu doküman ile kod çelişirse **kod
 ## 1. Taşıma
 | Alan | Değer |
 |---|---|
-| Transport | TCP, istemci (telefon) → sunucu (LowMonitor modülü) |
-| Port | 47800 (varsayılan) |
+| Transport | TCP, istemci (telefon) → sunucu (`lowdeck-agent`, PC kullanıcı oturumu; ADR-0002) |
+| Port | 47810 (varsayılan; 47800 LowMonitor `lowmon-net`'e ait) |
+| Bind | PC'nin LAN IP'si (config), `0.0.0.0` değil; firewall: yalnız Private profil + yerel alt ağ |
 | Bağlantı | Tek, kalıcı; `TCP_NODELAY` açık |
 | Çerçeve | `[u16 little-endian uzunluk][postcard payload]` |
 | Maks. payload | 4096 bayt |
@@ -48,8 +49,9 @@ S → C  Media(MediaState)                 # tam durum
 - 60 s boyunca istemciden hiçbir şey gelmezse bağlantı kapatılabilir.
 
 ## 5. İleride (taslak, uygulanmadı)
-- Keşif: sunucu UDP 47801'e 5 s'de bir `{"lowdeck":1,"port":47800,"name":…}` beacon yayınlar; istemci sadece ayar ekranı açıkken dinler.
+- Keşif: sunucu UDP 47811'e 5 s'de bir `{"lowdeck":1,"port":47810,"name":…}` beacon yayınlar; istemci sadece ayar ekranı açıkken dinler.
 - `C2S::Lock(LockCmd)`, `S2C::Lock(LockState)`: tuş kilidi.
-- `C2S::Subscribe(Topics)`, `S2C::Metrics(…)`: LowMonitor verisi.
+- `C2S::Subscribe(Topics)`, `S2C::Metrics(…)`: LowMonitor verisi (agent `\\.\pipe\LowMonitor`'a Viewer olarak bağlanıp aktarır — seçenek, ADR-0002).
+- Eşleştirme: LowMonitor spek §16.2 şeması (6 hane, 120 s → 256-bit token; PC'de SHA-256 hash, DPAPI; hatalı denemede 1 s gecikme, IP başına 10 hata → 10 dk ban). Gelince `PROTO_VERSION` artar.
 
 Yeni varyantlar **sona** eklenir. Mevcut alan değişirse `PROTO_VERSION` artar.

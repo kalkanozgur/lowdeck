@@ -1,6 +1,6 @@
 [package]
 name = "mock-server"
-description = "LowMonitor modülü hazır olana kadar sahte sunucu: komutları loglar, sahte durum push eder"
+description = "lowdeck-agent hazır olana kadar sahte sunucu: komutları loglar, sahte durum push eder"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

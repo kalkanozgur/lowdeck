@@ -13,7 +13,7 @@ Eski **Xiaomi Mi Note 10 Lite** (toco, SD730G, AMOLED) telefonu aynı LAN'daki W
 | Tuş kilidi (kedi-kilit tetikleme ya da ajan içinde hook) | **Sonra**, karar verilmedi |
 | LowMonitor kaynak verisini telefonda gösterme | Sonra |
 
-**Öncelik: telefon tarafı.** PC tarafı (sunucu) LowMonitor'a modül olarak yazılacak (Rust). O hazır olana kadar `tools/mock-server` kullanılır.
+**Öncelik: telefon tarafı.** PC tarafı ayrı, küçük bir exe: `tools/lowdeck-agent` (Rust, kullanıcı oturumu, ADR-0002). O hazır olana kadar `tools/mock-server` kullanılır.
 
 ## 2. Mimari kararlar (değiştirmeden önce kullanıcıya sor)
 | Karar | Seçim | Neden |
@@ -23,8 +23,8 @@ Eski **Xiaomi Mi Note 10 Lite** (toco, SD730G, AMOLED) telefonu aynı LAN'daki W
 | Taşıma | **Tek kalıcı TCP bağlantı**, sunucu durum değişince PUSH eder | Polling yok, telefon CPU'su boşta uyur |
 | Kodlama | `[u16 LE uzunluk][postcard]` | Komut çerçevesi 3–4 bayt, JSON parser yok |
 | Async | **Yok** (tokio vb. yok), 2 std thread | Binary boyutu ve uyanma sayısı düşük |
-| Kimlik doğrulama | Hello içinde paylaşılan token | Sadece LAN; TLS gereksiz yük |
-| Sunucu | LowMonitor içinde modül | Tek servis, tek port, ileride metrikler aynı bağlantıdan gelir |
+| Kimlik doğrulama | Hello içinde paylaşılan token; sonra LowMonitor §16.2 tarzı eşleştirme | Sadece LAN; TLS gereksiz yük. Bind LAN IP + Private firewall |
+| Sunucu | Ayrı `lowdeck-agent`, kullanıcı oturumu, TCP 47810 ([ADR-0002](docs/kararlar/ADR-0002-lowdeck-agent.md)) | Core Audio/SMTC session 0'da çalışmaz; LowMonitor servisi ağa kapalı, `lowmon-net` salt-okuma + WS/JSON + M6 |
 
 Lisans notu: Slint, GPL-3 ya da royalty-free lisansla kullanılıyor (masaüstü/mobil kişisel proje için uygun). Kapalı kaynak dağıtılacaksa lisans koşulları yeniden gözden geçirilir.
 
@@ -34,13 +34,14 @@ lowdeck/
 ├─ CLAUDE.md
 ├─ Cargo.toml                 # workspace + release profili (opt "s", LTO, strip, panic=abort)
 ├─ crates/
-│  ├─ lowdeck-proto/          # mesaj tipleri + çerçeveleme. LowMonitor da BUNU kullanır
+│  ├─ lowdeck-proto/          # mesaj tipleri + çerçeveleme (telefon + agent + mock)
 │  └─ lowdeck-client/         # UI'dan bağımsız istemci: bağlan/yeniden bağlan/ping/olay
 │     └─ examples/cli.rs      # UI'sız uçtan uca test istemcisi
 ├─ apps/lowdeck-phone/        # Slint uygulaması
 │  ├─ ui/main.slint           # tek ekran + ayar paneli
 │  └─ src/{lib.rs,main.rs,config.rs}   # lib = Android cdylib, main = masaüstü
-├─ tools/mock-server/         # sahte sunucu (LowMonitor modülü gelene kadar)
+├─ tools/mock-server/         # sahte sunucu (agent gelene kadar)
+├─ tools/lowdeck-agent/       # (Faz 4) gerçek PC sunucusu: Core Audio + SMTC
 ├─ .github/                   # CI (test+APK) ve tag tetikli release workflow'ları
 ├─ README.md · CHANGELOG.md · TODO.md
 └─ docs/
@@ -58,12 +59,12 @@ cargo test --workspace
 cargo clippy --workspace -- -D warnings
 
 # Masaüstünde geliştirme döngüsü (iki terminal)
-cargo run -p mock-server -- 47800 dev
+cargo run -p mock-server -- 47810 dev
 cargo run -p lowdeck-phone --bin lowdeck-desktop
-#   ilk açılışta ⚙ → host=127.0.0.1, port=47800, token=dev
+#   ilk açılışta ⚙ → host=127.0.0.1, port=47810, token=dev
 
 # UI'sız test
-cargo run -p lowdeck-client --example cli -- 127.0.0.1 47800 dev
+cargo run -p lowdeck-client --example cli -- 127.0.0.1 47810 dev
 #   v 70 | + | - | m | p | n | b | q
 
 # Android APK: lokalde değil, GitHub Actions'ta (bkz. Faz 0)
@@ -154,8 +155,11 @@ Hedefler (ölçülecek, tahmin değil):
 | Komut gecikmesi (dokunma → PC) | < 50 ms LAN | mock-server zaman damgası |
 Renderer seçimi (femtovg/skia/software) ölçümle karşılaştırılır.
 
-### Faz 4 — LowMonitor sunucu modülü (ayrı repo: LowMonitor)
-- `lowdeck-proto`'yu path ya da git bağımlılığı olarak ekle.
+### Faz 4 — `tools/lowdeck-agent` (bu repo; ADR-0002)
+- Kullanıcı oturumunda, `HKCU\…\Run` ile başlar (LowMonitor tray gibi). Servis değil.
+- `mock-server` iskeleti + gerçek arka uç; `lowdeck-proto` doğrudan.
+- Bind: config'teki LAN IP; firewall kuralı yalnız Private profil + yerel alt ağ.
+- LowMonitor konvansiyonları: `// SAFETY:` yorumu, async yok, Win32 için `windows-sys`. SMTC WinRT olduğu için `windows` crate gerekir (`windows-sys` WinRT içermez); Faz 4 başında exe boyutu ölçülüp sorulur.
 - Ses: Windows Core Audio — `IAudioEndpointVolume` (seviye/mute) + `IAudioEndpointVolumeCallback` (**push için değişiklik bildirimi**, polling yok) + `IMMNotificationClient` (varsayılan cihaz değişimi). `windows` crate.
 - Medya: `GlobalSystemMediaTransportControlsSessionManager` (SMTC): oturum, play/pause/next/prev, `MediaPropertiesChanged` / `PlaybackInfoChanged` olayları.
 - Fallback: SMTC oturumu yoksa medya tuşları `SendInput` ile `VK_MEDIA_*`.
