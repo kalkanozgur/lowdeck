@@ -71,6 +71,24 @@ component DeckButton inherits Rectangle {
     }
 }
 
+export struct TopRow { name: string, cpu: string, ws: string }
+
+// Metrik kutusu; canlı değilse "—" ve pasif renk.
+component Stat inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> live;
+    spacing: 2px;
+    horizontal-stretch: 1;
+    Text { text: root.label; color: Theme.dim; font-size: 12px; }
+    Text {
+        text: root.live ? root.value : "—";
+        color: root.live ? Theme.text : Theme.disabled;
+        font-size: 18px;
+        overflow: elide;
+    }
+}
+
 export component MainWindow inherits Window {
     title: "LowDeck";
     background: Theme.bg;
@@ -88,6 +106,16 @@ export component MainWindow inherits Window {
     in property <string> media-app: "";
     in property <string> track-title: "";
     in property <string> track-artist: "";
+
+    // --- LowMonitor metrikleri (agent pipe üzerinden; ≈2 s'de bir push) ---
+    in property <int> lm-state: 0; // 0 = veri yok, 1 = canlı, 2 = LowMonitor servisi yok
+    in property <string> lm-cpu;
+    in property <string> lm-ram;
+    in property <string> lm-disk;
+    in property <string> lm-net;
+    in property <[float]> lm-cores; // 0..1
+    in property <[TopRow]> lm-top;
+    property <bool> lm-live: root.connected && root.lm-state == 1;
 
     // --- Ayarlar ---
     in-out property <bool> settings-open: false;
@@ -107,8 +135,8 @@ export component MainWindow inherits Window {
     callback save-settings() -> bool; // false: doğrulama hatası, cfg-error dolu
 
     VerticalLayout {
-        padding: 20px;
-        spacing: 16px;
+        padding: 16px;
+        spacing: 12px;
 
         // Durum satırı
         HorizontalLayout {
@@ -204,6 +232,59 @@ export component MainWindow inherits Window {
                 clicked => { root.media(1); }
             }
             DeckButton { icon: Icons.next; enabled: root.connected; clicked => { root.media(2); } }
+        }
+
+        // --- PC (LowMonitor) ---
+        Rectangle { height: 8px; }
+        HorizontalLayout {
+            Text { text: "PC"; color: Theme.dim; font-size: 13px; }
+            Rectangle { horizontal-stretch: 1; }
+            Text {
+                text: !root.connected ? "" : root.lm-state == 2 ? "LowMonitor servisi yok" : root.lm-state == 0 ? "bekleniyor…" : "";
+                color: root.lm-state == 2 ? Theme.warn : Theme.dim;
+                font-size: 13px;
+            }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            Stat { label: "CPU"; value: root.lm-cpu; live: root.lm-live; }
+            Stat { label: "RAM"; value: root.lm-ram; live: root.lm-live; }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            Stat { label: "DİSK  B/s"; value: root.lm-disk; live: root.lm-live; }
+            Stat { label: "AĞ  B/s"; value: root.lm-net; live: root.lm-live; }
+        }
+        // Çekirdek başına çubuk (alttan dolar). Layout değil mutlak konum: `for` içeren
+        // layout boşken max-width = 0 verip pencereyi daraltıyordu.
+        bars := Rectangle {
+            height: 24px;
+            property <length> slot: self.width / max(1, root.lm-cores.length);
+            for c[i] in root.lm-cores: Rectangle {
+                x: i * bars.slot;
+                width: bars.slot - 3px;
+                background: Theme.surface;
+                Rectangle {
+                    height: parent.height * clamp(c, 0, 1);
+                    y: parent.height - self.height;
+                    background: root.lm-live ? Theme.accent : Theme.disabled;
+                }
+            }
+        }
+        Rectangle {
+            height: 5 * 20px; // Top-5 sabit yükseklik: liste değişince yerleşim zıplamaz
+            VerticalLayout {
+                width: parent.width;
+                height: parent.height;
+                alignment: start;
+                spacing: 2px;
+                for t in root.lm-top: HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: t.name; color: root.lm-live ? Theme.text : Theme.disabled; font-size: 14px; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: t.cpu; color: root.lm-live ? Theme.text : Theme.disabled; font-size: 14px; width: 56px; horizontal-alignment: right; }
+                    Text { text: t.ws; color: Theme.dim; font-size: 14px; width: 72px; horizontal-alignment: right; }
+                }
+            }
         }
 
         Rectangle { vertical-stretch: 1; }

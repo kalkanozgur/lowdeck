@@ -10,7 +10,8 @@
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
-pub const PROTO_VERSION: u16 = 1;
+/// v2: `Subscribe` / `Metrics` / `Top` (eski agent yeni varyantı çözemez → sürüm artışı).
+pub const PROTO_VERSION: u16 = 2;
 pub const DEFAULT_PORT: u16 = 47810;
 pub const MAX_FRAME: usize = 4096;
 
@@ -24,8 +25,14 @@ pub enum C2S {
     Ping(u32),
     Audio(AudioCmd),
     Media(MediaCmd),
-    // İleride (SONA eklenecek): Lock(LockCmd), Subscribe(Topics) ...
+    /// Abone olunan konular (`TOPIC_*` bitleri); 0 = hepsinden çık. Bağlantı başına durum.
+    Subscribe(Topics),
+    // İleride (SONA eklenecek): Lock(LockCmd) ...
 }
+
+pub type Topics = u8;
+/// LowMonitor metrikleri (`S2C::Metrics` + `S2C::Top`).
+pub const TOPIC_METRICS: Topics = 1;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum AudioCmd {
@@ -54,6 +61,36 @@ pub enum S2C {
     Audio(AudioState),
     Media(MediaState),
     Error(ErrorCode),
+    /// Abonelikte her örnekte (≈2 s). `None` = LowMonitor servisi yok / bağlanılamadı.
+    Metrics(Option<Metrics>),
+    /// Abonelikte Top-N üretildikçe (LowMonitor `topn_every`), CPU'ya göre azalan.
+    Top(Vec<TopItem>),
+}
+
+/// Kompakt temsil: postcard varint kodlar, küçük birim = az bayt.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct Metrics {
+    /// Toplam CPU, 0.01 % (10000 = %100).
+    pub cpu: u16,
+    /// Çekirdek başına, 0.5 % (200 = %100).
+    pub cores: Vec<u8>,
+    pub ram_used_mb: u32,
+    pub ram_total_mb: u32,
+    /// Tüm fiziksel diskler toplamı, KB/s (1 KB = 1024 B).
+    pub disk_r_kbps: u32,
+    pub disk_w_kbps: u32,
+    /// Tüm arayüzler toplamı, KB/s.
+    pub net_rx_kbps: u32,
+    pub net_tx_kbps: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct TopItem {
+    pub name: String,
+    /// Sistem kapasitesinin 0.01 %'u.
+    pub cpu: u16,
+    /// Working set, MB.
+    pub ws_mb: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
@@ -153,6 +190,7 @@ mod tests {
             C2S::Audio(AudioCmd::Step(-2)),
             C2S::Media(MediaCmd::Next),
             C2S::Ping(7),
+            C2S::Subscribe(TOPIC_METRICS),
         ];
         let mut wire = Vec::new();
         for m in &msgs {
@@ -174,6 +212,31 @@ mod tests {
         // Gövde ortasında kesilme gerçek hatadır.
         let r: Result<C2S, _> = read_frame(&mut &[5u8, 0, 1][..], &mut buf);
         assert!(matches!(r, Err(FrameError::Io(_))));
+    }
+
+    /// 16 çekirdek + Top-5 tek çerçeveye rahat sığar.
+    #[test]
+    fn metrics_fit_frame() {
+        let m = S2C::Metrics(Some(Metrics {
+            cpu: 10_000,
+            cores: vec![200; 16],
+            ram_used_mb: 32_000,
+            ram_total_mb: 65_000,
+            disk_r_kbps: u32::MAX,
+            disk_w_kbps: u32::MAX,
+            net_rx_kbps: u32::MAX,
+            net_tx_kbps: u32::MAX,
+        }));
+        let t = S2C::Top(vec![TopItem { name: "x".repeat(32), cpu: 10_000, ws_mb: 100_000 }; 5]);
+        let mut wire = Vec::new();
+        write_frame(&mut wire, &m).unwrap();
+        assert!(wire.len() < 64, "metrics {} bayt", wire.len());
+        let mut rd = &wire[..];
+        let mut buf = [0u8; MAX_FRAME];
+        assert_eq!(read_frame::<_, S2C>(&mut rd, &mut buf).unwrap(), m);
+        wire.clear();
+        write_frame(&mut wire, &t).unwrap();
+        assert!(wire.len() < 256, "top {} bayt", wire.len());
     }
 
     #[test]
