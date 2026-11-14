@@ -10,7 +10,7 @@
 use lowdeck_proto::*;
 use std::io::{BufReader, BufWriter};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -40,12 +40,15 @@ pub enum Event {
 pub struct Client {
     writer: Arc<Mutex<Option<BufWriter<TcpStream>>>>,
     stop: Arc<AtomicBool>,
+    /// İstenen abonelik; her Welcome'dan sonra yeniden gönderilir (sunucuda bağlantı başına).
+    topics: Arc<AtomicU8>,
 }
 
 impl Client {
     pub fn start(cfg: Config, on_event: impl Fn(Event) + Send + Sync + 'static) -> Self {
         let writer: Arc<Mutex<Option<BufWriter<TcpStream>>>> = Arc::new(Mutex::new(None));
         let stop = Arc::new(AtomicBool::new(false));
+        let topics = Arc::new(AtomicU8::new(0));
         let on_event = Arc::new(on_event);
 
         // net thread
@@ -53,9 +56,10 @@ impl Client {
             let writer = writer.clone();
             let stop = stop.clone();
             let on_event = on_event.clone();
+            let topics = topics.clone();
             thread::Builder::new()
                 .name("lowdeck-net".into())
-                .spawn(move || net_loop(cfg, writer, stop, &*on_event))
+                .spawn(move || net_loop(cfg, writer, stop, &topics, &*on_event))
                 .expect("spawn net");
         }
 
@@ -76,7 +80,14 @@ impl Client {
                 .expect("spawn ping");
         }
 
-        Client { writer, stop }
+        Client { writer, stop, topics }
+    }
+
+    /// Değişmediyse bir şey göndermez. Bağlı değilse bağlanınca gönderilir.
+    pub fn subscribe(&self, t: Topics) {
+        if self.topics.swap(t, Ordering::Relaxed) != t {
+            self.send(&C2S::Subscribe(t));
+        }
     }
 
     /// Bağlı değilse komut sessizce düşer (UI bağlantı durumunu zaten gösteriyor).
@@ -132,6 +143,7 @@ fn net_loop(
     cfg: Config,
     writer: Arc<Mutex<Option<BufWriter<TcpStream>>>>,
     stop: Arc<AtomicBool>,
+    topics: &AtomicU8,
     on_event: &(dyn Fn(Event) + Send + Sync),
 ) {
     let mut backoff = Duration::from_secs(1);
@@ -139,7 +151,7 @@ fn net_loop(
 
     while !stop.load(Ordering::Relaxed) {
         on_event(Event::Connecting);
-        let (reason, fatal) = match session(&cfg, &writer, &stop, &mut buf, on_event, &mut backoff) {
+        let (reason, fatal) = match session(&cfg, &writer, &stop, topics, &mut buf, on_event, &mut backoff) {
             Ok(()) => ("closed".to_string(), false),
             Err(Fail::Retry(e)) => (e, false),
             Err(Fail::Fatal(e)) => (e, true),
@@ -172,6 +184,7 @@ fn session(
     cfg: &Config,
     writer: &Mutex<Option<BufWriter<TcpStream>>>,
     stop: &AtomicBool,
+    topics: &AtomicU8,
     buf: &mut [u8; MAX_FRAME],
     on_event: &(dyn Fn(Event) + Send + Sync),
     backoff: &mut Duration,
@@ -208,6 +221,10 @@ fn session(
                 }
                 *backoff = Duration::from_secs(1);
                 on_event(Event::Connected { server });
+                let t = topics.load(Ordering::Relaxed);
+                if t != 0 {
+                    send_on(writer, &C2S::Subscribe(t));
+                }
             }
             S2C::Pong(_) => {} // sadece read timeout'u sıfırlar
             S2C::Error(code @ (ErrorCode::BadToken | ErrorCode::BadVersion)) => {

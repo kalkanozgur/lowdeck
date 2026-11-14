@@ -12,9 +12,11 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 - CI: agent için Windows job'u
 - Agent tray ikonu + menü (telefon ayarı, ayar dosyası, Windows ile başlat, çıkış); konsol penceresi yok
 - Agent tray → Ayarı yeniden yükle (yeniden başlatmadan); yanlış `bind` IP'si için açıklayıcı hata
+- Telefonda **PC** bölümü: LowMonitor'dan CPU (toplam + çekirdek çubukları), RAM, disk, ağ ve Top-5 süreç; agent `\\.\pipe\LowMonitor`'a yalnız telefon aboneyken bağlanır. Servis yoksa "LowMonitor servisi yok". Mock sahte metrik üretir.
 ### Düzeltildi
 - Karşı taraf bağlantıyı temiz kapatınca `io: failed to fill whole buffer` yerine `bağlantı kapandı` raporlanır
 ### Değişti
+- **Protokol v2** (`Subscribe`, `Metrics`, `Top`): telefon ve agent birlikte güncellenmeli; eski sürüm `BadVersion` ile reddedilir.
 - Varsayılan port 47800 → **47810** (LowMonitor `lowmon-net` ile çakışma). Kayıtlı ayardaki port elle güncellenmeli.
 - İstemci: connect sırasında durdurulan client zombi bağlantı bırakmıyor; eski client'ın olayları UI'ı ezmiyor
 - Agent: oturum Hello zaman aşımıyla (5 s) kopuyordu — Windows'ta `try_clone`'lu handle `SO_RCVTIMEO` paylaşmıyor; timeout okuma handle'ına. İstemcide aynı desen düzeltildi.

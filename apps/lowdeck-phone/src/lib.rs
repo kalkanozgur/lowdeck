@@ -8,7 +8,8 @@ mod config;
 
 use config::AppConfig;
 use lowdeck_client::{Client, Config, Event};
-use lowdeck_proto::{AudioCmd, MediaCmd, S2C};
+use lowdeck_proto::{AudioCmd, MediaCmd, Metrics, TopItem, S2C, TOPIC_METRICS};
+use slint::{Model, ModelRc, VecModel};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -89,7 +90,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
             let weak = weak.clone();
             let guard = last_local_edit.clone();
             let generation = generation.clone();
-            *client.borrow_mut() = Some(Client::start(
+            let c = Client::start(
                 Config { host: c.host.clone(), port: c.port, token: c.token.clone(), name: name.clone() },
                 move |ev| {
                     let guard = guard.clone();
@@ -100,7 +101,12 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                         }
                     });
                 },
-            ));
+            );
+            // Perde inikken metrik yok: ekranda görünmeyen veri için PC de telefon da uyanmasın.
+            if !ui.get_blackout() {
+                c.subscribe(TOPIC_METRICS);
+            }
+            *client.borrow_mut() = Some(c);
         }
     };
     let connect = Rc::new(connect);
@@ -110,19 +116,28 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
     let idle = Rc::new(slint::Timer::default());
     {
         let weak = ui.as_weak();
+        let client = client.clone();
         idle.start(slint::TimerMode::SingleShot, BLACKOUT_AFTER, move || {
             if let Some(ui) = weak.upgrade() {
                 ui.set_blackout(true);
+                ui.set_lm_state(0);
+            }
+            if let Some(c) = client.borrow().as_ref() {
+                c.subscribe(0);
             }
         });
     }
     let poke = {
         let idle = idle.clone();
         let weak = ui.as_weak();
+        let client = client.clone();
         move || {
             idle.restart();
             if let Some(ui) = weak.upgrade() {
                 ui.set_blackout(false);
+            }
+            if let Some(c) = client.borrow().as_ref() {
+                c.subscribe(TOPIC_METRICS); // değişmediyse gönderilmez
             }
         }
     };
@@ -268,6 +283,7 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
         Event::Disconnected { reason } => {
             ui.set_connected(false);
             ui.set_status(format!("Koptu: {reason}").into());
+            ui.set_lm_state(0);
         }
         Event::Msg(S2C::Audio(a)) => {
             if last_local_edit.lock().unwrap().elapsed() >= LOCAL_ECHO_GUARD {
@@ -283,6 +299,62 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
             ui.set_track_title(m.title.into());
             ui.set_track_artist(m.artist.into());
         }
+        Event::Msg(S2C::Metrics(None)) => {
+            ui.set_lm_state(2);
+            set_vec(ui.get_lm_cores(), Vec::new(), |v| ui.set_lm_cores(v));
+            set_vec(ui.get_lm_top(), Vec::new(), |v| ui.set_lm_top(v));
+        }
+        Event::Msg(S2C::Metrics(Some(m))) => show_metrics(ui, &m),
+        Event::Msg(S2C::Top(t)) => {
+            let rows = t.iter().map(top_row).collect();
+            set_vec(ui.get_lm_top(), rows, |v| ui.set_lm_top(v));
+        }
         Event::Msg(_) => {}
+    }
+}
+
+fn show_metrics(ui: &MainWindow, m: &Metrics) {
+    ui.set_lm_state(1);
+    ui.set_lm_cpu(format!("{:.0}%", m.cpu as f32 / 100.0).into());
+    ui.set_lm_ram(format!("{:.1} / {:.0} GB", m.ram_used_mb as f32 / 1024.0, m.ram_total_mb as f32 / 1024.0).into());
+    ui.set_lm_disk(format!("R {}  W {}", rate(m.disk_r_kbps), rate(m.disk_w_kbps)).into());
+    ui.set_lm_net(format!("↓ {}  ↑ {}", rate(m.net_rx_kbps), rate(m.net_tx_kbps)).into());
+    let cores = m.cores.iter().map(|&c| c as f32 / 200.0).collect();
+    set_vec(ui.get_lm_cores(), cores, |v| ui.set_lm_cores(v));
+}
+
+fn top_row(t: &TopItem) -> TopRow {
+    TopRow {
+        name: t.name.as_str().into(),
+        cpu: format!("{:.1}%", t.cpu as f32 / 100.0).into(),
+        ws: format!("{} MB", t.ws_mb).into(),
+    }
+}
+
+/// Kısa hız: birim etiketi "B/s" UI'da; dar ekranda iki değer yan yana sığsın.
+fn rate(kbps: u32) -> String {
+    match kbps {
+        0..1024 => format!("{kbps}K"),
+        1024..1_048_576 => format!("{:.1}M", kbps as f32 / 1024.0),
+        _ => format!("{:.1}G", kbps as f32 / 1_048_576.0),
+    }
+}
+
+/// Mevcut VecModel'i yeniden kullanır: repeater öğeleri her örnekte yeniden yaratılmaz.
+fn set_vec<T: Clone + 'static>(cur: ModelRc<T>, v: Vec<T>, set: impl FnOnce(ModelRc<T>)) {
+    match cur.as_any().downcast_ref::<VecModel<T>>() {
+        Some(m) => m.set_vec(v),
+        None => set(ModelRc::new(VecModel::from(v))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rate_units() {
+        assert_eq!(super::rate(0), "0K");
+        assert_eq!(super::rate(1023), "1023K");
+        assert_eq!(super::rate(1536), "1.5M");
+        assert_eq!(super::rate(3 * 1_048_576), "3.0G");
     }
 }

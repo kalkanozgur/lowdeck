@@ -6,6 +6,8 @@
 //! - client: telefondan okur, komutları audio/media thread'lerine kanalla iletir.
 //! - audio / media (`win.rs`): COM/WinRT nesnelerinin sahibi, `recv`'de bloklu;
 //!   Windows olayları (volume callback, SMTC event) kanala mesaj bırakır.
+//! - lowmon (`lowmon.rs`): telefon metriklere aboneyken `\\.\pipe\LowMonitor`'a Viewer
+//!   olarak bağlanır; abone yokken pipe kapalı, thread `Want`'ta uyur.
 //! - `Hub`: son durumu tutar, yalnız gerçekten değişince istemciye push eder.
 
 // Windows dışında yalnız testler derlenir (CI Linux); gerisi kullanılmaz.
@@ -24,6 +26,7 @@ use std::time::Duration;
 mod tray;
 #[cfg(windows)]
 mod win;
+mod lowmon;
 
 #[cfg(not(test))]
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -41,12 +44,48 @@ pub struct Hub {
     inner: Mutex<HubInner>,
     /// Bağlı telefon değişince çağrılır (tray ikonu). Kilit dışında çağrılır.
     on_client: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>>,
+    /// Bağlı telefon metriklere abone mi (lowmon thread bunu bekler).
+    pub want: Want,
+}
+
+/// Koşul değişkenli bayrak: lowmon thread abonelik yokken burada uyur (sıfır uyanma).
+#[derive(Default)]
+pub struct Want {
+    on: Mutex<bool>,
+    cv: std::sync::Condvar,
+}
+
+impl Want {
+    fn set(&self, v: bool) {
+        let mut g = self.on.lock().unwrap_or_else(|e| e.into_inner());
+        if *g != v {
+            *g = v;
+            self.cv.notify_all();
+        }
+    }
+
+    pub fn get(&self) -> bool {
+        *self.on.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// `true` olana kadar bekler.
+    pub fn wait_on(&self) {
+        let g = self.on.lock().unwrap_or_else(|e| e.into_inner());
+        drop(self.cv.wait_while(g, |on| !*on).unwrap_or_else(|e| e.into_inner()));
+    }
+
+    /// `d` kadar bekler, abonelik biterse erken döner.
+    pub fn sleep_while_on(&self, d: Duration) {
+        let g = self.on.lock().unwrap_or_else(|e| e.into_inner());
+        drop(self.cv.wait_timeout_while(g, d, |on| *on).unwrap_or_else(|e| e.into_inner()));
+    }
 }
 
 struct Client {
     id: u64,
     name: String,
     w: BufWriter<TcpStream>,
+    metrics: bool,
 }
 
 #[derive(Default)]
@@ -77,9 +116,28 @@ impl Hub {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// İstemci ya da aboneliği değişti: tray + lowmon'a bildir. Kilit dışında çağrılır.
     fn changed(&self) {
+        let want = self.lock().client.as_ref().is_some_and(|c| c.metrics);
+        self.want.set(want);
         if let Some(f) = self.on_client.get() {
             f();
+        }
+    }
+
+    fn subscribe(&self, id: u64, t: Topics) {
+        if let Some(c) = self.lock().client.as_mut().filter(|c| c.id == id) {
+            c.metrics = t & TOPIC_METRICS != 0;
+        }
+        self.changed();
+    }
+
+    /// Yalnız abone istemciye; önbelleğe alınmaz (eski örnek göstermek yanıltıcı).
+    pub fn push_metrics(&self, msg: S2C) {
+        let mut g = self.lock();
+        if g.client.as_ref().is_some_and(|c| c.metrics) && !g.send(&msg) {
+            drop(g);
+            self.changed();
         }
     }
 
@@ -135,7 +193,7 @@ impl Hub {
         }
         g.next_id += 1;
         let id = g.next_id;
-        g.client = Some(Client { id, name, w });
+        g.client = Some(Client { id, name, w, metrics: false });
         drop(g);
         self.changed();
         Some(id)
@@ -227,6 +285,7 @@ fn session(
             // Sonuç Windows olayı ile (gerçekten değişirse) push edilir.
             C2S::Audio(cmd) => backend.audio(cmd),
             C2S::Media(cmd) => backend.media(cmd),
+            C2S::Subscribe(t) => hub.subscribe(id, t),
             C2S::Hello { .. } => hub.reply(id, &S2C::Error(ErrorCode::Unsupported)),
         }
     })();
@@ -352,6 +411,7 @@ fn main() {
     let path = config_path();
     let hub = Arc::new(Hub::default());
     let backend: Arc<dyn Backend> = Arc::new(win::start(hub.clone()));
+    lowmon::start(hub.clone());
     let first = match load_or_create(&path) {
         Ok(c) => listen(c.clone(), &hub, &backend).map_err(|e| bind_error(&c, &e)),
         Err(e) => Err(e.to_string()),
@@ -471,6 +531,46 @@ mod tests {
         let mut b = connect();
         assert!(matches!(read_frame(&mut b, &mut buf).unwrap(), S2C::Welcome { .. }));
         assert!(matches!(read_frame::<_, S2C>(&mut a, &mut buf), Err(FrameError::Closed | FrameError::Io(_))));
+    }
+
+    /// Metrik yalnız abone istemciye gider; `want` abonelik ve bağlantıyı izler.
+    #[test]
+    fn metrics_subscription() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let hub = Arc::new(Hub::default());
+        {
+            let hub = hub.clone();
+            std::thread::spawn(move || handle(l.accept().unwrap().0, "t", &hub, &Null));
+        }
+        let s = TcpStream::connect(addr).unwrap();
+        let mut w = BufWriter::new(s.try_clone().unwrap());
+        write_frame(&mut w, &C2S::Hello { proto: PROTO_VERSION, token: "t".into(), name: "x".into() }).unwrap();
+        let mut rd = BufReader::new(s.try_clone().unwrap());
+        let mut buf = [0u8; MAX_FRAME];
+        for _ in 0..3 {
+            read_frame::<_, S2C>(&mut rd, &mut buf).unwrap();
+        }
+        hub.push_metrics(S2C::Metrics(None)); // abone değil → gitmez
+        let wait = |want: bool| {
+            for _ in 0..100 {
+                if hub.want.get() == want {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("want != {want}");
+        };
+        write_frame(&mut w, &C2S::Subscribe(TOPIC_METRICS)).unwrap();
+        wait(true);
+        hub.push_metrics(S2C::Top(vec![]));
+        assert_eq!(read_frame::<_, S2C>(&mut rd, &mut buf).unwrap(), S2C::Top(vec![]));
+        write_frame(&mut w, &C2S::Subscribe(0)).unwrap();
+        wait(false);
+        write_frame(&mut w, &C2S::Subscribe(TOPIC_METRICS)).unwrap();
+        wait(true);
+        s.shutdown(Shutdown::Both).unwrap();
+        wait(false);
     }
 
     /// Hello zaman aşımı oturuma taşmamalı (Windows'ta try_clone'lu handle timeout'u paylaşmıyor).
