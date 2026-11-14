@@ -41,7 +41,7 @@ lowdeck/
 │  ├─ ui/main.slint           # tek ekran + ayar paneli
 │  └─ src/{lib.rs,main.rs,config.rs}   # lib = Android cdylib, main = masaüstü
 ├─ tools/mock-server/         # sahte sunucu (LowMonitor modülü gelene kadar)
-├─ .github/                   # CI (test+APK) ve onaylı release workflow'ları
+├─ .github/                   # CI (test+APK) ve tag tetikli release workflow'ları
 ├─ README.md · CHANGELOG.md · TODO.md
 └─ docs/
    ├─ PROTOCOL.md             # protokol sözleşmesi
@@ -109,14 +109,14 @@ APK'lar GitHub Actions'ta derlenir. Lokalde sadece Rust + masaüstü build gerek
 | Workflow | Tetik | Ne yapar |
 |---|---|---|
 | `.github/workflows/ci.yml` | PR, main push | test + clippy → imzalı APK → **artifact** (14 gün) |
-| `.github/workflows/release.yml` | `v*` tag push | **`release` ortamı onayı** → imzalı APK → GitHub Release (+ sha256) |
+| `.github/workflows/release.yml` | `v*` tag push | imzalı APK (onay = tag push; ortam onayı yok, bkz. not) → GitHub Release (+ sha256) |
 | `.github/actions/build-apk` | ortak | JDK 17, Rust + `aarch64-linux-android`, SDK 34, NDK r27c, cargo-apk, imzalama |
 
 Çalışma akışı:
 1. Claude değişikliği **ayrı bir branch'te** yapar, PR açar. `main`'e doğrudan push yasak.
 2. CI yeşil olmalı. APK artifact'ı PR'ın Checks sekmesinden indirilir.
 3. Kullanıcı PR'ı GitHub'dan (mobil uygulama dahil) inceler ve merge eder.
-4. Sürüm: `Cargo.toml` `[workspace.package] version` artırılır (ayrı PR) → merge → `git tag vX.Y.Z && git push --tags` → kullanıcı Actions'ta **Approve** der → Release'den APK telefona indirilir.
+4. Sürüm: `Cargo.toml` `[workspace.package] version` artırılır (ayrı PR) → merge → `git tag vX.Y.Z && git push --tags` (**tag'i yalnızca kullanıcı atar**; Claude tag push etmez) → Release'den APK telefona indirilir.
 
 Tek seferlik kurulum (kullanıcı yapar):
 - [ ] Kalıcı keystore (anahtar kaybolursa telefonda güncelleme yerine kaldır-kur gerekir; yedeği sakla):
@@ -125,8 +125,7 @@ Tek seferlik kurulum (kullanıcı yapar):
   [Convert]::ToBase64String([IO.File]::ReadAllBytes("lowdeck-release.keystore")) | Set-Clipboard
   ```
 - [ ] Repo → Settings → Secrets → Actions: `ANDROID_KEYSTORE_B64` (panodaki değer), `ANDROID_KEYSTORE_PASSWORD`.
-- [ ] Settings → Environments → `release` → **Required reviewers**: kendisi.
-- [ ] Settings → Branches → `main` koruması: PR zorunlu, `check` + `apk` job'ları geçmeli.
+- Not (2026-11-14): repo private + GitHub Free → branch koruması ve environment reviewer **kullanılamıyor** (API 403). PR akışı ve "main'e doğrudan push yok" kuralı disiplinle uygulanır; merge öncesi `check` + `apk` yeşil olmalı. Pro'ya geçilir ya da repo public olursa koruma + `environment: release` geri eklenir.
 - [ ] Keystore dosyası **asla** repoya girmez (`.gitignore`'da `*.keystore`).
 
 Workflow'lar ilk koşuda doğrulanacak; kırılırsa log okunup düzeltilir (ör. cargo-apk çıktı yolu, NDK sürümü). Slint'in güncel rehberi xbuild'i de gösteriyor; cargo-apk sorun çıkarırsa alternatif o.
