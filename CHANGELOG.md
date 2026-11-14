@@ -8,6 +8,8 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 - Proje iskeleti (README, TODO, devlog, ADR, gereksinimler)
 - Gömülü SVG ikonlar (emoji yerine), bağlantı yokken pasif butonlar, ayar ekranında host/port/token doğrulaması
 - Android: önde iken ekran açık, 2 dk dokunulmazsa siyah perde; arka plana geçince bağlantı kapanır, öne gelince açılır
+- `lowdeck-agent`: gerçek PC sunucusu (Core Audio ses/mute + cihaz değişimi, SMTC medya + parça bilgisi, SMTC yoksa medya tuşu), olay tabanlı push
+- CI: agent için Windows job'u
 ### Düzeltildi
 - Karşı taraf bağlantıyı temiz kapatınca `io: failed to fill whole buffer` yerine `bağlantı kapandı` raporlanır
 ### Değişti
