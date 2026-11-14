@@ -20,4 +20,4 @@ Ayrıntılı gerekçe: `CLAUDE.md` §2.
 ## Sonuçlar
 - Artı: protokol tipleri LowMonitor ile tek crate'ten paylaşılır; telefon tamir edilmeden masaüstünde geliştirme sürer.
 - Eksi: APK testi için CI döngüsü gerekir (lokal hızlı iterasyon yok).
-- Risk: CI workflow'ları hiç koşmadı (cargo-apk/NDK uyumu); Slint lisansı kapalı kaynak dağıtımda yeniden değerlendirilmeli.
+- Risk: release.yml henüz koşmadı (ci.yml 2026-11-14'te yeşil); branch koruması yok (private + Free); Slint lisansı kapalı kaynak dağıtımda yeniden değerlendirilmeli.
