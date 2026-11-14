@@ -27,6 +27,11 @@ global Icons {
     out property <image> settings: @image-url("icons/settings.svg");
 }
 
+// Her dokunuş boşta sayacını sıfırlar (Rust: tek-atışlık Timer::restart).
+export global Activity {
+    callback poke();
+}
+
 component DeckButton inherits Rectangle {
     in property <string> label;
     in property <image> icon;
@@ -47,7 +52,7 @@ component DeckButton inherits Rectangle {
 
     ta := TouchArea {
         enabled: root.enabled;
-        clicked => { root.clicked(); }
+        clicked => { Activity.poke(); root.clicked(); }
     }
     Image {
         source: root.icon;
@@ -90,6 +95,9 @@ export component MainWindow inherits Window {
     in-out property <string> cfg-port;
     in-out property <string> cfg-token;
     in-out property <string> cfg-error;
+
+    // Boşta siyah perde: AMOLED pikselleri söner (burn-in + tüketim). Dokununca kalkar.
+    in-out property <bool> blackout: false;
 
     // --- UI -> Rust ---
     callback volume-changed(float);
@@ -152,7 +160,7 @@ export component MainWindow inherits Window {
             maximum: 100;
             value <=> root.volume;
             enabled: root.connected;
-            changed(v) => { root.volume-changed(v); }
+            changed(v) => { Activity.poke(); root.volume-changed(v); }
         }
         HorizontalLayout {
             spacing: 12px;
@@ -231,5 +239,11 @@ export component MainWindow inherits Window {
                 }
             }
         }
+    }
+
+    // --- Siyah perde (en üstte). Ayar paneli açıkken gösterilmez (yazarken kararmasın). ---
+    if root.blackout && !root.settings-open: Rectangle {
+        background: #000000;
+        TouchArea { clicked => { Activity.poke(); } }
     }
 }

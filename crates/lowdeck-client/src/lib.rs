@@ -139,7 +139,7 @@ fn net_loop(
 
     while !stop.load(Ordering::Relaxed) {
         on_event(Event::Connecting);
-        let (reason, fatal) = match session(&cfg, &writer, &mut buf, on_event, &mut backoff) {
+        let (reason, fatal) = match session(&cfg, &writer, &stop, &mut buf, on_event, &mut backoff) {
             Ok(()) => ("closed".to_string(), false),
             Err(Fail::Retry(e)) => (e, false),
             Err(Fail::Fatal(e)) => (e, true),
@@ -171,6 +171,7 @@ impl<E: std::fmt::Display> From<E> for Fail {
 fn session(
     cfg: &Config,
     writer: &Mutex<Option<BufWriter<TcpStream>>>,
+    stop: &AtomicBool,
     buf: &mut [u8; MAX_FRAME],
     on_event: &(dyn Fn(Event) + Send + Sync),
     backoff: &mut Duration,
@@ -188,6 +189,12 @@ fn session(
             &C2S::Hello { proto: PROTO_VERSION, token: cfg.token.clone(), name: cfg.name.clone() },
         )?;
         *writer.lock().map_err(|_| Fail::Fatal("lock poisoned".into()))? = Some(w);
+    }
+    // Drop, connect sürerken geldiyse writer'ı göremedi: soketi burada kapat
+    // (yoksa zombi bağlantı READ_TIMEOUT'a kadar açık kalır). Drop önce `stop`'u
+    // yazıp sonra kilidi aldığı için iki taraftan biri mutlaka kapatır.
+    if stop.load(Ordering::Relaxed) {
+        return Ok(());
     }
 
     loop {
