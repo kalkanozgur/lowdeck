@@ -145,14 +145,19 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
         let weak = ui.as_weak();
         let connect = connect.clone();
         ui.on_save_settings(move || {
-            let Some(ui) = weak.upgrade() else { return };
-            let c = AppConfig {
-                host: ui.get_cfg_host().trim().to_string(),
-                port: ui.get_cfg_port().trim().parse().unwrap_or(lowdeck_proto::DEFAULT_PORT),
-                token: ui.get_cfg_token().to_string(),
-            };
-            config::save(cfg_path.as_deref(), &c);
-            connect(&c);
+            let Some(ui) = weak.upgrade() else { return false };
+            match config::parse(&ui.get_cfg_host(), &ui.get_cfg_port(), &ui.get_cfg_token()) {
+                Ok(c) => {
+                    ui.set_cfg_error("".into());
+                    config::save(cfg_path.as_deref(), &c);
+                    connect(&c);
+                    true
+                }
+                Err(e) => {
+                    ui.set_cfg_error(e.into());
+                    false
+                }
+            }
         });
     }
 
