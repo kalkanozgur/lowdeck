@@ -12,7 +12,7 @@ Eski **Xiaomi Mi Note 10 Lite** (toco, SD730G, AMOLED) telefonu aynı LAN'daki W
 | Medya kontrolü (play/pause, ileri, geri) + çalan parça bilgisi | **Faz 1 — şimdi** |
 | Tuş kilidi (kedi-kilit tetikleme ya da ajan içinde hook) | **Sonra**, karar verilmedi |
 | LowMonitor kaynak verisini telefonda gösterme | Sonra |
-| LowMonitor PC arayüzü (masaüstü; Canlı + Olaylar), agent köprüsü | Sıradaki ([ADR-0003](docs/kararlar/ADR-0003-agent-lowmonitor-koprusu.md), LM ADR-0029) |
+| LowMonitor PC arayüzü (masaüstü; Canlı + Olaylar + Geçmiş), agent köprüsü | Var ([ADR-0003](docs/kararlar/ADR-0003-agent-lowmonitor-koprusu.md), [ADR-0005](docs/kararlar/ADR-0005-gecmis-sorgusu.md), LM ADR-0029) |
 
 **Öncelik: telefon tarafı.** PC tarafı ayrı, küçük bir exe: `tools/lowdeck-agent` (Rust, kullanıcı oturumu, ADR-0002). O hazır olana kadar `tools/mock-server` kullanılır.
 
@@ -164,8 +164,8 @@ Renderer seçimi (femtovg/skia/software) ölçümle karşılaştırılır.
 - Kullanıcı oturumunda, `HKCU\…\Run` ile başlar (LowMonitor tray gibi). Servis değil.
 - [x] İskelet + Hub (önbellek, yalnız değişince push, yeni bağlantı eskisini kapatır) + Core Audio + SMTC + VK_MEDIA fallback. Release 238 KB, private 2,5 MB, boşta 0 CPU.
 - [x] Tray ikonu (yeşil = telefon bağlı, gri = bekliyor; tooltip host:port + telefon adı), menü: telefon ayar satırı, ayar dosyasını aç, **Windows ile başlat** (`HKCU\…\Run`), Çıkış. Konsolsuz (`windows_subsystem`), tek örnek, başlangıç hatası MessageBox.
-- [ ] Log dosyası (şu an println konsolsuzda kayboluyor).
-- [ ] Firewall kuralı (Private + yerel alt ağ); şu an Windows'un ilk dinlemede açtığı izin penceresine kalıyor.
+- [x] Log dosyası: `%APPDATA%\LowDeck\agent.log`, 1 MiB'ta `.1`'e döner; tray → Log'u aç.
+- [x] Firewall kuralı: tray → "Firewall kuralı ekle (yönetici)…" → UAC ile `netsh` (Private + yerel alt ağ, exe + port). Windows'ta doğrulanacak.
 - [ ] Telefon + agent LAN üzerinden gerçek cihazla gecikme ölçümü (< 50 ms hedefi).
 - Bind: config'teki LAN IP; firewall kuralı yalnız Private profil + yerel alt ağ.
 - LowMonitor konvansiyonları: `// SAFETY:` yorumu, async yok, Win32 için `windows-sys`. SMTC WinRT olduğu için `windows` crate gerekir (`windows-sys` WinRT içermez); Faz 4 başında exe boyutu ölçülüp sorulur.
