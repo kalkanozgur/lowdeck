@@ -57,8 +57,14 @@ impl Backend for WinBackend {
     }
     fn events(&self, from_ms: u64, to_ms: u64) -> Vec<lowdeck_proto::EventItem> {
         crate::lowmon::query_events(from_ms, to_ms).unwrap_or_else(|e| {
-            println!("lowmon olay sorgusu: {e}");
+            log!("lowmon olay sorgusu: {e}");
             Vec::new()
+        })
+    }
+    fn history(&self, from_ms: u64, to_ms: u64, n: u16) -> (u64, Vec<Option<lowdeck_proto::HistPoint>>) {
+        crate::lowmon::query_history(from_ms, to_ms, n).unwrap_or_else(|e| {
+            log!("lowmon geçmiş sorgusu: {e}");
+            (0, Vec::new())
         })
     }
 }
@@ -83,7 +89,7 @@ fn spawn(name: &str, f: impl FnOnce() -> Result<()> + Send + 'static) {
         .name(n.clone())
         .spawn(move || {
             if let Err(e) = f() {
-                eprintln!("{n}: {e}");
+                log!("{n}: {e}");
             }
         })
         .expect("thread");

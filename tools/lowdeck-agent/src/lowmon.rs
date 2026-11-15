@@ -6,8 +6,9 @@
 //! Servis yoksa abonelik sürdükçe 10 s'de bir yeniden dener (LowMonitor tray gibi).
 
 use crate::Hub;
-use lowdeck_proto::{EventItem, Metrics, TopItem, EVENT_NAME_MAX, S2C};
-use lowmon_proto::metrics::EventKind;
+use lowdeck_proto::{EventItem, HistPoint, Metrics, TopItem, EVENT_NAME_MAX, S2C};
+use lowmon_proto::metrics::{AggKind, EventKind};
+use lowmon_proto::proto::RangeItem;
 use lowmon_proto::metrics::{Sample, TopEntry};
 use std::sync::Arc;
 use std::time::Duration;
@@ -60,6 +61,89 @@ pub fn top_of(t: &[TopEntry]) -> Vec<TopItem> {
         .collect()
 }
 
+/// Bundan uzun aralıkta dakika özeti istenir (LM spek §9.3).
+pub const MINUTE_ABOVE_MS: u64 = 6 * 3_600_000;
+
+#[derive(Default, Clone, Copy)]
+struct Acc {
+    n: u64,
+    cpu: u64,
+    ram_kb: u64,
+    dr: u64,
+    dw: u64,
+    rx: u64,
+    tx: u64,
+    /// `Max` özeti ya da ham örneklerin en büyüğü; yoksa ortalama kullanılır.
+    max: Option<u16>,
+}
+
+/// Geçmiş kovaları (ADR-0005): pipe `Range` öğeleri akış halinde eklenir, bellek = kova sayısı.
+pub struct Buckets {
+    from: u64,
+    step: u64,
+    acc: Vec<Acc>,
+}
+
+impl Buckets {
+    pub fn new(from_ms: u64, to_ms: u64, n: u16) -> Self {
+        let n = u64::from(n.max(1));
+        let step = to_ms.saturating_sub(from_ms).div_ceil(n).max(1);
+        Self { from: from_ms, step, acc: vec![Acc::default(); n as usize] }
+    }
+
+    fn slot(&mut self, ts_ms: u64) -> Option<&mut Acc> {
+        let i = ts_ms.checked_sub(self.from)? / self.step;
+        self.acc.get_mut(usize::try_from(i).ok()?)
+    }
+
+    /// `Sample` ortalamaya ve max'a; `Agg{Avg}` ortalamaya; `Agg{Max}` yalnız CPU max'a. Gap/Event/Min yok sayılır.
+    pub fn add(&mut self, item: &RangeItem) {
+        let (s, avg, max) = match item {
+            RangeItem::Sample(s) => (s, true, true),
+            RangeItem::Agg { kind: AggKind::Avg, sample } => (sample, true, false),
+            RangeItem::Agg { kind: AggKind::Max, sample } => (sample, false, true),
+            _ => return,
+        };
+        let Some(a) = self.slot(s.ts_unix_ms) else { return };
+        if avg {
+            a.n += 1;
+            a.cpu += u64::from(s.cpu_total);
+            a.ram_kb += s.ram_used_kb;
+            a.dr += s.disk.iter().map(|d| d.r_bps).sum::<u64>();
+            a.dw += s.disk.iter().map(|d| d.w_bps).sum::<u64>();
+            a.rx += s.net.iter().map(|n| n.rx_bps).sum::<u64>();
+            a.tx += s.net.iter().map(|n| n.tx_bps).sum::<u64>();
+        }
+        if max {
+            a.max = Some(a.max.unwrap_or(0).max(s.cpu_total));
+        }
+    }
+
+    /// (step_ms, kovalar); ortalaması olmayan kova `None`.
+    pub fn finish(self) -> (u64, Vec<Option<HistPoint>>) {
+        let v = self
+            .acc
+            .iter()
+            .map(|a| {
+                let n = a.n;
+                (n > 0).then(|| {
+                    let cpu_avg = (a.cpu / n) as u16;
+                    HistPoint {
+                        cpu_avg,
+                        cpu_max: a.max.unwrap_or(cpu_avg).max(cpu_avg),
+                        ram_mb: (a.ram_kb / n / 1024) as u32,
+                        disk_r_kbps: kbps(a.dr / n),
+                        disk_w_kbps: kbps(a.dw / n),
+                        net_rx_kbps: kbps(a.rx / n),
+                        net_tx_kbps: kbps(a.tx / n),
+                    }
+                })
+            })
+            .collect();
+        (self.step, v)
+    }
+}
+
 #[cfg(windows)]
 pub fn start(hub: Arc<Hub>) {
     let _ = std::thread::Builder::new()
@@ -83,7 +167,7 @@ fn run(hub: &Hub) {
         // Abonelik bittiyse sessizce bekle; sürüyorsa servis yok/koptu.
         if hub.want.get() {
             if let Err(e) = r {
-                println!("lowmon: {e}");
+                log!("lowmon: {e}");
             }
             hub.push_metrics(S2C::Metrics(None));
             hub.set_alarms(Vec::new()); // bilinmiyor; yeniden bağlanınca pipe `Alarms` gönderir
@@ -140,6 +224,31 @@ pub fn query_events(from_ms: u64, to_ms: u64) -> std::io::Result<Vec<EventItem>>
     }
 }
 
+/// Pipe `QueryRange` → kovalar (ADR-0005). Ayrı kısa bağlantı; > 6 sa dakika özeti. Servis yok / hata → `Err`.
+#[cfg(windows)]
+pub fn query_history(from_ms: u64, to_ms: u64, n: u16) -> std::io::Result<(u64, Vec<Option<HistPoint>>)> {
+    use lowmon_proto::proto::{self, ClientMsg, Resolution, Role, ServerMsg, PROTO};
+    let resolution = if to_ms.saturating_sub(from_ms) > MINUTE_ABOVE_MS { Resolution::Minute } else { Resolution::Raw };
+    let mut f = std::fs::OpenOptions::new().read(true).write(true).open(lowmon_proto::proto::PIPE_NAME)?;
+    proto::write(&mut f, &ClientMsg::Hello { proto: PROTO, role: Role::Viewer })?;
+    proto::write(&mut f, &ClientMsg::QueryRange { from_ms, to_ms, resolution })?;
+    let (mut b, mut acks) = (Buckets::new(from_ms, to_ms, n), 0);
+    loop {
+        match proto::read::<ServerMsg>(&mut f)? {
+            ServerMsg::Range(items) => items.iter().for_each(|i| b.add(i)),
+            // İlk Ack = Hello yanıtı, ikincisi sorgu sonu
+            ServerMsg::Ack => {
+                acks += 1;
+                if acks == 2 {
+                    return Ok(b.finish());
+                }
+            }
+            ServerMsg::Error { code } => return Err(std::io::Error::other(format!("servis: {code:?}"))),
+            _ => {}
+        }
+    }
+}
+
 /// Sample'da toplam yok; fiziksel RAM oturumda değişmez, bağlantı başına bir kez.
 #[cfg(windows)]
 fn ram_total_kb() -> u64 {
@@ -184,6 +293,42 @@ mod tests {
         assert_eq!(t.len(), TOP_N);
         assert_eq!((t[0].name.len(), t[0].cpu, t[0].ws_mb), (NAME_MAX, 9, 2));
         assert_eq!(t.iter().map(|i| i.cpu).collect::<Vec<_>>(), [9, 5, 3, 2, 1]);
+    }
+
+    #[test]
+    fn buckets() {
+        let smp = |ts, cpu, ram_kb, r_bps| Sample {
+            ts_unix_ms: ts,
+            cpu_total: cpu,
+            ram_used_kb: ram_kb,
+            disk: vec![DiskIo { drive: 0, r_bps, w_bps: 0 }],
+            ..Default::default()
+        };
+        // 0..4000 ms, 4 kova (1 s): kova 0 iki örnek, kova 1 boş (gap), kova 2 Agg, kova 3 yalnız Max (ortalama yok)
+        let mut b = Buckets::new(0, 4000, 4);
+        b.add(&RangeItem::Sample(smp(0, 1000, 2048, 2048)));
+        b.add(&RangeItem::Sample(smp(500, 3000, 4096, 0)));
+        b.add(&RangeItem::Gap { from_ms: 1000, to_ms: 2000, reason: lowmon_proto::metrics::GapReason::Paused });
+        b.add(&RangeItem::Agg { kind: AggKind::Avg, sample: smp(2000, 2000, 1024, 0) });
+        b.add(&RangeItem::Agg { kind: AggKind::Max, sample: smp(2000, 9000, 0, 0) });
+        b.add(&RangeItem::Agg { kind: AggKind::Min, sample: smp(2000, 1, 0, 0) });
+        b.add(&RangeItem::Agg { kind: AggKind::Max, sample: smp(3000, 5000, 0, 0) });
+        b.add(&RangeItem::Sample(smp(4000, 100, 0, 0))); // aralık dışı
+        let (step, v) = b.finish();
+        assert_eq!(step, 1000);
+        let p0 = v[0].unwrap();
+        assert_eq!((p0.cpu_avg, p0.cpu_max, p0.ram_mb, p0.disk_r_kbps), (2000, 3000, 3, 1));
+        assert_eq!(v[1], None);
+        assert_eq!((v[2].unwrap().cpu_avg, v[2].unwrap().cpu_max), (2000, 9000));
+        assert_eq!(v[3], None);
+    }
+
+    #[test]
+    fn bucket_step_rounds_up() {
+        let (step, v) = Buckets::new(0, 1001, 10).finish();
+        assert_eq!((step, v.len()), (101, 10));
+        let (step, _) = Buckets::new(5, 5, 0).finish();
+        assert_eq!(step, 1);
     }
 
     #[test]
