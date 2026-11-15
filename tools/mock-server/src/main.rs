@@ -2,6 +2,7 @@
 //! Varsayılan: 47810, token "dev".
 //! Tek istemci, tek thread; gerçek ses/medya API'si çağırmaz.
 //! Metrik aboneliğinde 2 s'de bir sahte `Metrics`, 6 s'de bir `Top` üretir.
+//! `QueryHistory`: dalga biçimli kovalar, ortada boş blok (servis kapalı benzetimi).
 
 use lowdeck_proto::*;
 use std::io::{BufReader, BufWriter};
@@ -125,6 +126,15 @@ fn handle(stream: TcpStream, token: &str) -> Result<(), FrameError> {
                 write_frame(&mut wr, &S2C::Events(vec![e]))?;
                 write_frame(&mut wr, &S2C::Events(vec![]))?;
             }
+            C2S::QueryHistory { from_ms, to_ms, points } => {
+                let n = points.clamp(1, HIST_POINTS_MAX) as u64;
+                let step_ms = to_ms.saturating_sub(from_ms).div_ceil(n).max(1);
+                let v = fake_history(n as u32);
+                for chunk in v.chunks(HIST_PER_FRAME) {
+                    write_frame(&mut wr, &S2C::History { from_ms, step_ms, points: chunk.to_vec() })?;
+                }
+                write_frame(&mut wr, &S2C::History { from_ms, step_ms, points: vec![] })?;
+            }
             C2S::Hello { .. } => write_frame(&mut wr, &S2C::Error(ErrorCode::Unsupported))?,
         }
     }
@@ -147,6 +157,27 @@ fn fake_metrics(t: u32) -> Metrics {
         net_rx_kbps: wave(t, 6, 12_000),
         net_tx_kbps: wave(t + 2, 6, 900),
     }
+}
+
+/// %40–%45 arası boş (çizgi kopmalı), gerisi `fake_metrics` dalgaları.
+fn fake_history(n: u32) -> Vec<Option<HistPoint>> {
+    (0..n)
+        .map(|i| {
+            let gap = (n * 40 / 100..n * 45 / 100).contains(&i);
+            (!gap).then(|| {
+                let m = fake_metrics(i / 3);
+                HistPoint {
+                    cpu_avg: m.cpu,
+                    cpu_max: (m.cpu as u32 + 1500).min(10_000) as u16,
+                    ram_mb: m.ram_used_mb,
+                    disk_r_kbps: m.disk_r_kbps,
+                    disk_w_kbps: m.disk_w_kbps,
+                    net_rx_kbps: m.net_rx_kbps,
+                    net_tx_kbps: m.net_tx_kbps,
+                }
+            })
+        })
+        .collect()
 }
 
 fn fake_top(t: u32) -> Vec<TopItem> {

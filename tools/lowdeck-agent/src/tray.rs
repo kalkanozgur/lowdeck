@@ -22,7 +22,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconIndirect, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
     DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, MessageBoxW, PostMessageW, PostQuitMessage,
     RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, TrackPopupMenu, TranslateMessage, HICON, ICONINFO,
-    MB_ICONERROR, MF_CHECKED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, SW_SHOWNORMAL, TPM_NONOTIFY, TPM_RETURNCMD,
+    MB_ICONERROR, MF_CHECKED, SW_HIDE, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, SW_SHOWNORMAL, TPM_NONOTIFY, TPM_RETURNCMD,
     TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_DESTROY, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
 };
 
@@ -32,6 +32,8 @@ const ID_CFG: usize = 1;
 const ID_AUTO: usize = 2;
 const ID_EXIT: usize = 3;
 const ID_RELOAD: usize = 4;
+const ID_LOG: usize = 5;
+const ID_FIREWALL: usize = 6;
 const RUN_KEY: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Run");
 const RUN_VALUE: &str = "LowDeckAgent";
 // shortcut: sabit 16 px; yüksek DPI'da kabuk ölçekler (bulanık). LowMonitor tray ile aynı sınır.
@@ -223,8 +225,8 @@ fn autostart_set(on: bool) {
 // ---------------- Menü + pencere ----------------
 
 fn menu(hwnd: HWND) {
-    let Some((phone, cfg)) = STATE.with_borrow(|s| {
-        s.as_ref().map(|(i, _)| (format!("Telefon ⚙  {}  ·  {}  ·  {}", i.bind, i.port, i.token), i.cfg_path.clone()))
+    let Some((phone, cfg, port)) = STATE.with_borrow(|s| {
+        s.as_ref().map(|(i, _)| (format!("Telefon ⚙  {}  ·  {}  ·  {}", i.bind, i.port, i.token), i.cfg_path.clone(), i.port))
     }) else {
         return;
     };
@@ -236,6 +238,8 @@ fn menu(hwnd: HWND) {
         let _ = AppendMenuW(m, MF_SEPARATOR, 0, None);
         let _ = AppendMenuW(m, MF_STRING, ID_CFG, w!("Ayar dosyasını aç"));
         let _ = AppendMenuW(m, MF_STRING, ID_RELOAD, w!("Ayarı yeniden yükle"));
+        let _ = AppendMenuW(m, MF_STRING, ID_LOG, w!("Log'u aç"));
+        let _ = AppendMenuW(m, MF_STRING, ID_FIREWALL, w!("Firewall kuralı ekle (yönetici)…"));
         let checked = if autostart_enabled() { MF_CHECKED } else { Default::default() };
         let _ = AppendMenuW(m, MF_STRING | checked, ID_AUTO, w!("Windows ile başlat"));
         let _ = AppendMenuW(m, MF_SEPARATOR, 0, None);
@@ -257,6 +261,19 @@ fn menu(hwnd: HWND) {
                 // Değişiklik yeniden başlatınca geçerli (Çıkış → tekrar aç).
                 let p = wide(&cfg.display().to_string());
                 ShellExecuteW(Some(hwnd), w!("open"), w!("notepad.exe"), PCWSTR(p.as_ptr()), None, SW_SHOWNORMAL);
+            }
+            ID_LOG => {
+                if let Some(p) = crate::log::path() {
+                    let p = wide(&p.display().to_string());
+                    ShellExecuteW(Some(hwnd), w!("open"), w!("notepad.exe"), PCWSTR(p.as_ptr()), None, SW_SHOWNORMAL);
+                }
+            }
+            // UAC tek kez: cmd.exe yükseltilir, agent yükseltilmemiş kalır. Sonuç dönmez (runas asenkron).
+            ID_FIREWALL => {
+                let Some(exe) = std::env::current_exe().ok().and_then(|p| p.to_str().map(String::from)) else { return };
+                let args = wide(&crate::firewall_args(port, &exe));
+                let r = ShellExecuteW(Some(hwnd), w!("runas"), w!("cmd.exe"), PCWSTR(args.as_ptr()), None, SW_HIDE);
+                log!("firewall: kural istendi (port {port}, sonuç {})", r.0 as isize);
             }
             _ => {}
         }

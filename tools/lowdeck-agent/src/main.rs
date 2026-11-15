@@ -22,6 +22,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[macro_use]
+mod log;
 #[cfg(windows)]
 mod tray;
 #[cfg(windows)]
@@ -292,6 +294,10 @@ pub trait Backend: Send + Sync {
     fn events(&self, _from_ms: u64, _to_ms: u64) -> Vec<EventItem> {
         Vec::new()
     }
+    /// LowMonitor metrik geçmişi, `n` kova (ADR-0005): (step_ms, kovalar); hata/servis yok → boş.
+    fn history(&self, _from_ms: u64, _to_ms: u64, _n: u16) -> (u64, Vec<Option<HistPoint>>) {
+        (0, Vec::new())
+    }
 }
 
 // ---------------- Bağlantı ----------------
@@ -322,11 +328,11 @@ fn handle_in(stream: TcpStream, slot: usize, token: &str, hub: &Hub, backend: &d
                 None
             };
             if let Some(e) = err {
-                println!("- reddedildi: {peer:?} ({e:?})");
+                log!("- reddedildi: {peer:?} ({e:?})");
                 write_frame(&mut BufWriter::new(stream), &S2C::Error(e))?;
                 return Ok(());
             }
-            println!("+ bağlandı: {name} {peer:?}");
+            log!("+ bağlandı: {name} {peer:?}");
             rd.get_ref().set_read_timeout(Some(READ_TIMEOUT)).ok();
             let Some(id) = hub.attach(slot, name, BufWriter::new(stream)) else { return Ok(()) };
             session(&mut rd, &mut buf, id, hub, backend)
@@ -355,6 +361,13 @@ fn session(
                     hub.reply(id, &S2C::Events(chunk.to_vec()));
                 }
                 hub.reply(id, &S2C::Events(Vec::new())); // bitti
+            }
+            C2S::QueryHistory { from_ms, to_ms, points } => {
+                let (step_ms, v) = backend.history(from_ms, to_ms, points.clamp(1, HIST_POINTS_MAX));
+                for chunk in v.chunks(HIST_PER_FRAME) {
+                    hub.reply(id, &S2C::History { from_ms, step_ms, points: chunk.to_vec() });
+                }
+                hub.reply(id, &S2C::History { from_ms, step_ms, points: Vec::new() }); // bitti
             }
             C2S::Hello { .. } => hub.reply(id, &S2C::Error(ErrorCode::Unsupported)),
         }
@@ -408,7 +421,7 @@ fn load_or_create(path: &std::path::Path) -> std::io::Result<AgentConfig> {
             c.bind, c.port, c.token
         ),
     )?;
-    println!("ayar oluşturuldu: {}", path.display());
+    log!("ayar oluşturuldu: {}", path.display());
     Ok(c)
 }
 
@@ -462,7 +475,7 @@ fn listen(cfg: AgentConfig, hub: &Arc<Hub>, backend: &Arc<dyn Backend>) -> std::
     if !lan_addr.ip().is_loopback() {
         match TcpListener::bind(("127.0.0.1", lan_addr.port())) {
             Ok(l) => listeners.push(l),
-            Err(e) => println!("loopback dinlenemedi: {e}"),
+            Err(e) => log!("loopback dinlenemedi: {e}"),
         }
     }
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -477,7 +490,19 @@ fn listen(cfg: AgentConfig, hub: &Arc<Hub>, backend: &Arc<dyn Backend>) -> std::
                 .spawn(move || accept_loop(listener, token, hub, backend, s))?,
         );
     }
+    log!("dinleniyor: {addrs:?}");
     Ok(Running { cfg, addrs, stop, threads })
+}
+
+/// Gelen bağlantı kuralı (Faz 4): yalnız Private profil + yerel alt ağ, bu exe ve port.
+/// `cmd.exe /c` parametresi; önce aynı adlı kural silinir → tekrar çalıştırmak güvenli (port değişince de).
+pub fn firewall_args(port: u16, exe: &str) -> String {
+    const RULE: &str = "netsh advfirewall firewall";
+    const NAME: &str = "name=\"LowDeck agent\"";
+    format!(
+        "/c {RULE} delete rule {NAME} >nul 2>&1 & {RULE} add rule {NAME} dir=in action=allow protocol=TCP \
+         localport={port} profile=private remoteip=localsubnet program=\"{exe}\""
+    )
 }
 
 /// Kullanıcıya gösterilecek bind hatası; en sık hata: bind'a telefonun IP'sini yazmak.
@@ -498,8 +523,10 @@ fn main() {
     if !tray::single_instance() {
         return;
     }
-    tray::register_ui_exe();
     let path = config_path();
+    log::init(path.with_file_name("agent.log"));
+    log!("lowdeck-agent {} başladı (proto v{PROTO_VERSION})", env!("CARGO_PKG_VERSION"));
+    tray::register_ui_exe();
     let hub = Arc::new(Hub::default());
     let backend: Arc<dyn Backend> = Arc::new(win::start(hub.clone()));
     lowmon::start(hub.clone());
@@ -564,7 +591,7 @@ fn accept_loop(
             .stack_size(64 * 1024)
             .spawn(move || {
                 if let Err(e) = handle(s, &token, &hub, &*backend) {
-                    println!("- koptu ({e})");
+                    log!("- koptu ({e})");
                 }
             });
     }
@@ -728,6 +755,15 @@ mod tests {
         assert_eq!(hub.lock().alarms, ["ram"]);
     }
 
+    #[test]
+    fn firewall_rule() {
+        let a = firewall_args(47810, r"C:\Users\a b\AppData\Local\LowDeck\lowdeck-agent.exe");
+        assert!(a.starts_with("/c netsh advfirewall firewall delete rule name=\"LowDeck agent\""));
+        assert!(a.contains(" & netsh advfirewall firewall add rule name=\"LowDeck agent\" dir=in action=allow protocol=TCP "));
+        assert!(a.contains("localport=47810 profile=private remoteip=localsubnet"));
+        assert!(a.ends_with(r#"program="C:\Users\a b\AppData\Local\LowDeck\lowdeck-agent.exe""#));
+    }
+
     struct History(usize);
     impl Backend for History {
         fn audio(&self, _: AudioCmd) {}
@@ -735,6 +771,31 @@ mod tests {
         fn events(&self, from_ms: u64, _: u64) -> Vec<EventItem> {
             (0..self.0).map(|i| EventItem { ts_ms: from_ms + i as u64, ..Default::default() }).collect()
         }
+        fn history(&self, _: u64, _: u64, n: u16) -> (u64, Vec<Option<HistPoint>>) {
+            (1000, vec![Some(HistPoint::default()); usize::from(n)])
+        }
+    }
+
+    /// QueryHistory: istek kırpılır (HIST_POINTS_MAX), HIST_PER_FRAME'lik parçalar + boş bitiş.
+    #[test]
+    fn query_history_chunks_and_clamps() {
+        let hub = Arc::new(Hub::default());
+        let (mut w, mut rd) = client(serve(&hub, SLOT_LOCAL, Arc::new(History(0))));
+        let mut buf = [0u8; MAX_FRAME];
+        write_frame(&mut w, &C2S::QueryHistory { from_ms: 7, to_ms: 9, points: u16::MAX }).unwrap();
+        let mut n = 0;
+        loop {
+            match read_frame::<_, S2C>(&mut rd, &mut buf).unwrap() {
+                S2C::History { points, .. } if points.is_empty() => break,
+                S2C::History { from_ms, step_ms, points } => {
+                    assert_eq!((from_ms, step_ms), (7, 1000));
+                    assert!(points.len() <= HIST_PER_FRAME);
+                    n += points.len();
+                }
+                m => panic!("beklenmeyen {m:?}"),
+            }
+        }
+        assert_eq!(n, usize::from(HIST_POINTS_MAX));
     }
 
     /// QueryEvents: EVENTS_PER_FRAME'lik parçalar + boş bitiş çerçevesi.

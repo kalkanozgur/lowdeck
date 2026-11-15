@@ -43,13 +43,14 @@ component Spark inherits Rectangle {
     in property <color> ca;
     in property <color> cb;
     in property <string> scale; // "" = sabit 0..%100 ölçek, etiket yok
-    height: 56px;
+    in property <float> vb: 300; // viewbox genişliği: Canlı 300 s, Geçmiş kova sayısı
     if root.a != "": Path {
         width: 100%;
         height: 100%;
         commands: root.a;
-        viewbox-width: 300;
+        viewbox-width: root.vb;
         viewbox-height: 100;
+        fit: fill; // varsayılan contain en-boy oranını korur → grafik kartı doldurmaz
         stroke: root.ca;
         stroke-width: 1.5px;
     }
@@ -57,8 +58,9 @@ component Spark inherits Rectangle {
         width: 100%;
         height: 100%;
         commands: root.b;
-        viewbox-width: 300;
+        viewbox-width: root.vb;
         viewbox-height: 100;
+        fit: fill; // varsayılan contain en-boy oranını korur → grafik kartı doldurmaz
         stroke: root.cb;
         stroke-width: 1.5px;
     }
@@ -69,6 +71,37 @@ component Spark inherits Rectangle {
         text: root.scale;
         color: Theme.dim;
         font-size: 10px;
+    }
+}
+
+// Geçmiş kartı: etiket + büyük grafik (Spark, kova sayısı viewbox).
+component HistCard inherits Rectangle {
+    in property <string> label;
+    in property <string> a;
+    in property <string> b;
+    in property <color> ca: Theme.accent;
+    in property <color> cb: Theme.accent2;
+    in property <string> scale;
+    in property <float> vb;
+    background: Theme.surface;
+    border-radius: 8px;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    min-height: 110px;
+    VerticalLayout {
+        padding: 10px;
+        spacing: 4px;
+        Text { text: root.label; color: Theme.dim; font-size: 12px; }
+        Spark {
+            vertical-stretch: 1;
+            min-height: 60px;
+            a: root.a;
+            b: root.b;
+            ca: root.ca;
+            cb: root.cb;
+            scale: root.scale;
+            vb: root.vb;
+        }
     }
 }
 
@@ -96,6 +129,7 @@ component Stat inherits Rectangle {
             overflow: elide;
         }
         Spark {
+            height: 56px;
             a: root.path-a;
             b: root.path-b;
             ca: root.live ? root.color-a : Theme.disabled;
@@ -134,7 +168,25 @@ export component MainWindow inherits Window {
     in property <[TopRow]> lm-top;
     in property <string> alarms; // "" = aktif alarm yok
     in property <[EventRow]> events; // yeni → eski
-    in-out property <int> tab: 0; // 0 = Canlı, 1 = Olaylar
+    in-out property <int> tab: 0; // 0 = Canlı, 1 = Olaylar, 2 = Geçmiş
+    // Geçmiş (ADR-0005): aralık 0..3 = 1 sa / 6 sa / 24 sa / 7 g; path'ler Rust'ta (viewbox hist-n × 100)
+    in-out property <int> hist-span: 0;
+    in property <string> hist-status;
+    in property <string> hist-range;
+    in property <float> hist-n: 600;
+    in property <string> hist-cpu-avg;
+    in property <string> hist-cpu-max;
+    in property <string> hist-ram;
+    in property <string> hist-disk-r;
+    in property <string> hist-disk-w;
+    in property <string> hist-net-rx;
+    in property <string> hist-net-tx;
+    in property <string> hist-ram-scale;
+    in property <string> hist-disk-scale;
+    in property <string> hist-net-scale;
+    callback query-history(int);
+    // 2×2 eşit kart: pencere − 2·16 px kenar − 12 px aralık (Path içeriği stretch'i bozuyor)
+    property <length> hist-card-w: (root.width - 2 * 16px - 12px) / 2;
     property <bool> live: root.connected && root.lm-state == 1;
 
     callback refresh-events();
@@ -147,6 +199,7 @@ export component MainWindow inherits Window {
             spacing: 8px;
             Tab { label: "Canlı"; active: root.tab == 0; clicked => { root.tab = 0; } }
             Tab { label: "Olaylar"; active: root.tab == 1; clicked => { root.tab = 1; } }
+            Tab { label: "Geçmiş"; active: root.tab == 2; clicked => { root.tab = 2; root.query-history(root.hist-span); } }
             Rectangle { horizontal-stretch: 1; }
             Rectangle {
                 width: 10px;
@@ -236,6 +289,44 @@ export component MainWindow inherits Window {
                 }
             }
             Rectangle { vertical-stretch: 1; }
+        }
+
+        // --- Geçmiş: hazır aralıklar, bitiş = şimdi; yenileme yalnız tıklamayla (timer yok) ---
+        if root.tab == 2: VerticalLayout {
+            spacing: 8px;
+            HorizontalLayout {
+                spacing: 6px;
+                for l[i] in ["1 sa", "6 sa", "24 sa", "7 g"]: Tab {
+                    label: l;
+                    width: 64px;
+                    active: root.hist-span == i;
+                    clicked => {
+                        root.hist-span = i;
+                        root.query-history(i);
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text {
+                    text: root.hist-status != "" ? root.hist-status : root.hist-range;
+                    color: Theme.dim;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                vertical-stretch: 1;
+                // Max önce (soluk), ortalama üstte
+                HistCard { width: root.hist-card-w; label: "CPU  ort. / en yüksek"; a: root.hist-cpu-max; ca: #2f6f8a; b: root.hist-cpu-avg; cb: Theme.accent; vb: root.hist-n; }
+                HistCard { width: root.hist-card-w; label: "RAM"; a: root.hist-ram; scale: root.hist-ram-scale; vb: root.hist-n; }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                vertical-stretch: 1;
+                HistCard { width: root.hist-card-w; label: "DİSK  R / W"; a: root.hist-disk-r; b: root.hist-disk-w; scale: root.hist-disk-scale; vb: root.hist-n; }
+                HistCard { width: root.hist-card-w; label: "AĞ  ↓ / ↑"; a: root.hist-net-rx; b: root.hist-net-tx; ca: Theme.ok; scale: root.hist-net-scale; vb: root.hist-n; }
+            }
         }
 
         // --- Olaylar (son 24 saat + canlı) ---
