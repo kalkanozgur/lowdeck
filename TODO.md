@@ -14,6 +14,9 @@
 - [x] PC dağıtımı: Release'e Windows zip, agent `UiExe` yazar, masaüstü agent'ı başlatır (ADR-0004)
 - [ ] ADR-0004 Windows doğrulaması: zip kurulumu, agent kapalıyken "Arayüzü aç", `agent.cfg` yokken ilk açılış
 - [x] Masaüstü Geçmiş sekmesi + proto v4 `QueryHistory` (ADR-0005)
+- [x] Masaüstü Süreçler sekmesi + sonlandırma (ADR-0006)
+- [ ] Süreçler: Windows'ta tarama süresi/CPU, normal + yönetici süreci sonlandırma (UAC), PID reuse
+- [ ] Süreçler: öncelik / EcoQoS (sonra)
 - [ ] Geçmiş: Windows'ta gerçek LM ile 1 sa / 24 sa / 7 g yanıt süresi (hedef < 2 s)
 - [ ] Masaüstü Canlı grafikleri: Windows'ta boşta CPU / private bytes / exe boyutu ölçümü
 - [ ] `lowmon-proto` rev'i LowMonitor sürümleriyle birlikte güncelle (pipe `PROTO` artarsa agent `servis: BadHello` loglar)

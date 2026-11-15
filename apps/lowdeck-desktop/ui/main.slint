@@ -17,6 +17,7 @@ global Theme {
 
 export struct TopRow { name: string, cpu: string, ws: string }
 export struct EventRow { time: string, kind: int, name: string, value: string }
+export struct ProcRow { pid: int, name: string, cpu: string, ws: string, protected: bool, selected: bool }
 
 component Tab inherits Rectangle {
     in property <string> label;
@@ -172,7 +173,7 @@ export component MainWindow inherits Window {
     in property <[TopRow]> lm-top;
     in property <string> alarms; // "" = aktif alarm yok
     in property <[EventRow]> events; // yeni → eski
-    in-out property <int> tab: 0; // 0 = Canlı, 1 = Olaylar, 2 = Geçmiş
+    in-out property <int> tab: 0; // 0 = Canlı, 1 = Olaylar, 2 = Geçmiş, 3 = Süreçler
     // Geçmiş (ADR-0005): aralık 0..3 = 1 sa / 6 sa / 24 sa / 7 g; path'ler Rust'ta (viewbox hist-n × 100)
     in-out property <int> hist-span: 0;
     in property <string> hist-status;
@@ -189,6 +190,17 @@ export component MainWindow inherits Window {
     in property <string> hist-disk-scale;
     in property <string> hist-net-scale;
     callback query-history(int);
+    // Süreçler (LM spek §9.4): tarama Rust'ta, yalnız bu sekme görünürken 2 s'de bir
+    in property <[ProcRow]> procs;
+    in property <string> proc-status;
+    in property <bool> proc-can-kill;
+    in property <bool> proc-confirm; // iki aşamalı onay: ilk tık "Emin misin?"
+    in-out property <int> proc-sort: 0; // 0 = CPU, 1 = RAM
+    callback proc-select(int);
+    callback proc-kill();
+    callback proc-sort-changed(int);
+    callback tab-changed(int);
+    changed tab => { root.tab-changed(self.tab); }
     property <bool> live: root.connected && root.lm-state == 1;
 
     callback refresh-events();
@@ -202,6 +214,7 @@ export component MainWindow inherits Window {
             Tab { label: "Canlı"; active: root.tab == 0; clicked => { root.tab = 0; } }
             Tab { label: "Olaylar"; active: root.tab == 1; clicked => { root.tab = 1; } }
             Tab { label: "Geçmiş"; active: root.tab == 2; clicked => { root.tab = 2; root.query-history(root.hist-span); } }
+            Tab { label: "Süreçler"; active: root.tab == 3; clicked => { root.tab = 3; } }
             Rectangle { horizontal-stretch: 1; }
             Rectangle {
                 width: 10px;
@@ -328,6 +341,77 @@ export component MainWindow inherits Window {
                 vertical-stretch: 1;
                 HistCard { label: "DİSK  R / W"; a: root.hist-disk-r; b: root.hist-disk-w; scale: root.hist-disk-scale; vb: root.hist-n; }
                 HistCard { label: "AĞ  ↓ / ↑"; a: root.hist-net-rx; b: root.hist-net-tx; ca: Theme.ok; scale: root.hist-net-scale; vb: root.hist-n; }
+            }
+        }
+
+        // --- Süreçler: tüm süreçler, CPU/RAM sıralı; sonlandırma iki aşamalı onayla (spek §10) ---
+        if root.tab == 3: VerticalLayout {
+            spacing: 6px;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                spacing: 8px;
+                Text { text: "AD"; color: Theme.dim; font-size: 12px; horizontal-stretch: 1; }
+                Text { text: "PID"; color: Theme.dim; font-size: 12px; width: 64px; horizontal-alignment: right; }
+                Text {
+                    text: root.proc-sort == 0 ? "CPU ▾" : "CPU";
+                    color: root.proc-sort == 0 ? Theme.accent : Theme.dim;
+                    font-size: 12px;
+                    width: 72px;
+                    horizontal-alignment: right;
+                    TouchArea { clicked => { root.proc-sort = 0; root.proc-sort-changed(0); } }
+                }
+                Text {
+                    text: root.proc-sort == 1 ? "RAM ▾" : "RAM";
+                    color: root.proc-sort == 1 ? Theme.accent : Theme.dim;
+                    font-size: 12px;
+                    width: 88px;
+                    horizontal-alignment: right;
+                    TouchArea { clicked => { root.proc-sort = 1; root.proc-sort-changed(1); } }
+                }
+            }
+            ListView {
+                vertical-stretch: 1;
+                for p[i] in root.procs: Rectangle {
+                    height: 24px;
+                    border-radius: 4px;
+                    background: p.selected ? Theme.surface : transparent;
+                    TouchArea { clicked => { root.proc-select(i); } }
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        spacing: 8px;
+                        Text {
+                            text: p.name;
+                            color: p.protected ? Theme.dim : Theme.text;
+                            font-size: 14px;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+                        Text { text: p.pid; color: Theme.dim; font-size: 13px; width: 64px; horizontal-alignment: right; vertical-alignment: center; }
+                        Text { text: p.cpu; color: Theme.text; font-size: 14px; width: 72px; horizontal-alignment: right; vertical-alignment: center; }
+                        Text { text: p.ws; color: Theme.dim; font-size: 14px; width: 88px; horizontal-alignment: right; vertical-alignment: center; }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                height: 32px;
+                Text {
+                    text: root.proc-status;
+                    color: root.proc-confirm ? Theme.warn : Theme.dim;
+                    font-size: 13px;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                if root.proc-can-kill: Tab {
+                    width: 128px;
+                    label: root.proc-confirm ? "Evet, sonlandır" : "Sonlandır";
+                    active: root.proc-confirm;
+                    clicked => { root.proc-kill(); }
+                }
             }
         }
 

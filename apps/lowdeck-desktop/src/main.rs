@@ -1,11 +1,13 @@
-//! LowMonitor PC arayüzü (LM ADR-0029, LowDeck ADR-0003): Canlı + Olaylar.
+//! LowMonitor PC arayüzü (LM ADR-0029, LowDeck ADR-0003): Canlı, Olaylar, Geçmiş, Süreçler.
 //! Veri yalnız `lowdeck-agent` loopback'ten (127.0.0.1); token aynı kullanıcının `agent.cfg`'sinden.
 //! Kullanım: `lowdeck-desktop [port token]` (argümanlar agent.cfg'yi ezer; mock-server için `47810 dev`).
+//! `lowdeck-desktop --kill <pid> <ctime>`: yükseltilmiş kopya (UAC), pencere açmaz, sonuç = çıkış kodu.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 slint::include_modules!();
 
 mod history;
+mod procs;
 #[cfg(windows)]
 mod win;
 
@@ -22,6 +24,10 @@ const HISTORY_MS: u64 = 24 * 3_600_000;
 const EVENTS_MAX: usize = 1000;
 
 fn main() -> Result<(), slint::PlatformError> {
+    // Tek örnek kontrolünden önce: yükseltilmiş kopya mutex'i görüp çıkmasın.
+    if let Some(code) = kill_mode() {
+        std::process::exit(code);
+    }
     #[cfg(windows)]
     if !win::single_instance() {
         return Ok(());
@@ -33,6 +39,8 @@ fn main() -> Result<(), slint::PlatformError> {
     let events = Rc::new(VecModel::<EventRow>::default());
     ui.set_events(ModelRc::from(events.clone()));
     let offset = local_offset_s();
+    procs_init(&ui);
+    window_events(&ui);
 
     match target() {
         Some((port, token)) => start_client(&ui, events, port, token, offset),
@@ -71,21 +79,8 @@ fn start_client(ui: &MainWindow, events: Rc<VecModel<EventRow>>, port: u16, toke
             let _ = weak.upgrade_in_event_loop(move |ui| apply(&ui, ev, offset));
         },
     ));
-    client.subscribe(TOPIC_METRICS | TOPIC_EVENTS);
-
-    // Küçültülünce metrik düşer (agent abone kalmazsa pipe'ı kapatır); olaylar sürer: alarm bandı + liste güncel.
-    {
-        use slint::winit_030::{winit::event::WindowEvent, EventResult, WinitWindowAccessor};
-        let client = client.clone();
-        ui.window().on_winit_window_event(move |_, ev| {
-            // Windows'ta küçültme = 0×0 Resized
-            if let WindowEvent::Resized(s) = ev {
-                let minimized = s.width == 0 && s.height == 0;
-                client.subscribe(if minimized { TOPIC_EVENTS } else { TOPIC_METRICS | TOPIC_EVENTS });
-            }
-            EventResult::Propagate
-        });
-    }
+    client.subscribe(topics(MINIMIZED.with(|m| m.get())));
+    CLIENT.with(|c| *c.borrow_mut() = Some(client.clone()));
 
     // Geçmiş sekmesi: düğme / sekmeye geçiş → tek sorgu (ADR-0005); otomatik yenileme yok.
     {
@@ -117,6 +112,278 @@ fn start_client(ui: &MainWindow, events: Rc<VecModel<EventRow>>, port: u16, toke
     QUERY.with(|q| *q.borrow_mut() = Some(Box::new(query)));
 }
 
+/// Küçültülünce metrik düşer (agent abone kalmazsa pipe'ı kapatır); olaylar sürer: alarm bandı + liste güncel.
+fn topics(minimized: bool) -> lowdeck_proto::Topics {
+    if minimized {
+        TOPIC_EVENTS
+    } else {
+        TOPIC_METRICS | TOPIC_EVENTS
+    }
+}
+
+/// Pencere olayları tek kancada (winit kancası tek): küçültme → abonelik + süreç taraması durur.
+fn window_events(ui: &MainWindow) {
+    use slint::winit_030::{winit::event::WindowEvent, EventResult, WinitWindowAccessor};
+    let weak = ui.as_weak();
+    ui.window().on_winit_window_event(move |_, ev| {
+        // Windows'ta küçültme = 0×0 Resized; yalnız durum değişince işlem
+        if let WindowEvent::Resized(s) = ev {
+            let minimized = s.width == 0 && s.height == 0;
+            if MINIMIZED.with(|m| m.replace(minimized)) != minimized {
+                CLIENT.with(|c| c.borrow().as_ref().map(|c| c.subscribe(topics(minimized))));
+                if let Some(ui) = weak.upgrade() {
+                    procs_sync(&ui);
+                }
+            }
+        }
+        EventResult::Propagate
+    });
+}
+
+// ---------------- Süreçler (LM spek §9.4, §10) ----------------
+
+struct ProcUi {
+    tracker: procs::Tracker,
+    rows: Vec<procs::Row>,
+    /// Tarama buffer'ı (Windows), yeniden kullanılır.
+    buf: Vec<u64>,
+    selected: Option<(u32, i64)>,
+    sort: procs::SortBy,
+    confirm: bool,
+    /// Yükseltilmiş kopya bekleniyor.
+    busy: bool,
+    open: bool,
+    status: String,
+    timer: slint::Timer,
+}
+
+impl Default for ProcUi {
+    fn default() -> Self {
+        Self {
+            tracker: Default::default(),
+            rows: Vec::new(),
+            buf: Vec::new(),
+            selected: None,
+            sort: procs::SortBy::Cpu,
+            confirm: false,
+            busy: false,
+            open: false,
+            status: String::new(),
+            timer: slint::Timer::default(),
+        }
+    }
+}
+
+/// `--kill <pid> <ctime>` ise sonuç kodu (yükseltilmiş kopya).
+fn kill_mode() -> Option<i32> {
+    let a: Vec<String> = std::env::args().skip(1).collect();
+    let [flag, pid, ctime] = a.as_slice() else { return None };
+    if flag != "--kill" {
+        return None;
+    }
+    let (Ok(pid), Ok(ctime)) = (pid.parse::<u32>(), ctime.parse::<i64>()) else {
+        return Some(procs::exit::FAILED);
+    };
+    Some(kill_now(pid, ctime))
+}
+
+fn kill_now(pid: u32, ctime: i64) -> i32 {
+    #[cfg(windows)]
+    return win::kill(pid, ctime);
+    #[cfg(not(windows))]
+    {
+        let _ = (pid, ctime);
+        procs::exit::FAILED
+    }
+}
+
+fn procs_init(ui: &MainWindow) {
+    ui.set_procs(ModelRc::new(VecModel::<ProcRow>::default()));
+    let w = ui.as_weak();
+    ui.on_tab_changed(move |t| {
+        let Some(ui) = w.upgrade() else { return };
+        PROCS.with(|p| {
+            let mut p = p.borrow_mut();
+            p.open = t == 3;
+            p.confirm = false;
+        });
+        procs_sync(&ui);
+    });
+    let w = ui.as_weak();
+    ui.on_proc_sort_changed(move |i| {
+        let Some(ui) = w.upgrade() else { return };
+        PROCS.with(|p| {
+            let mut p = p.borrow_mut();
+            p.sort = if i == 1 { procs::SortBy::Ram } else { procs::SortBy::Cpu };
+            let sort = p.sort;
+            procs::sort_rows(&mut p.rows, sort);
+        });
+        procs_render(&ui);
+    });
+    let w = ui.as_weak();
+    ui.on_proc_select(move |i| {
+        let Some(ui) = w.upgrade() else { return };
+        PROCS.with(|p| {
+            let mut p = p.borrow_mut();
+            let Some(r) = p.rows.get(i as usize).cloned() else { return };
+            p.selected = Some((r.pid, r.ctime));
+            p.confirm = false;
+            let lock = if procs::protected(r.pid, &r.name) { "  ·  korumalı" } else { "" };
+            p.status = format!("{}  ·  PID {}{lock}", r.name, r.pid);
+        });
+        procs_render(&ui);
+    });
+    let w = ui.as_weak();
+    ui.on_proc_kill(move || {
+        if let Some(ui) = w.upgrade() {
+            proc_kill(&ui);
+        }
+    });
+}
+
+/// Tarama yalnız sekme açık ve pencere küçültülmemişken (tek periyodik iş, 2 s); kapanınca timer durur.
+fn procs_sync(ui: &MainWindow) {
+    let active = PROCS.with(|p| p.borrow().open) && !MINIMIZED.with(|m| m.get());
+    let running = PROCS.with(|p| p.borrow().timer.running());
+    if active && !running {
+        procs_refresh(ui);
+        let w = ui.as_weak();
+        PROCS.with(|p| {
+            p.borrow().timer.start(
+                slint::TimerMode::Repeated,
+                std::time::Duration::from_millis(procs::SCAN_MS),
+                move || {
+                    if let Some(ui) = w.upgrade() {
+                        procs_refresh(&ui);
+                    }
+                },
+            )
+        });
+    } else if !active && running {
+        PROCS.with(|p| {
+            let mut p = p.borrow_mut();
+            p.timer.stop();
+            p.tracker.reset();
+        });
+    }
+}
+
+fn procs_refresh(ui: &MainWindow) {
+    let ncpu = std::thread::available_parallelism().map_or(1, |n| n.get() as u64);
+    PROCS.with(|p| {
+        let mut p = p.borrow_mut();
+        let raw = scan(&mut p.buf);
+        let sort = p.sort;
+        p.rows = p.tracker.update(now_ms(), ncpu, raw, sort);
+        // Seçili süreç öldüyse seçim düşer
+        if let Some(sel) = p.selected {
+            if !p.rows.iter().any(|r| (r.pid, r.ctime) == sel) {
+                p.selected = None;
+                p.confirm = false;
+            }
+        }
+    });
+    procs_render(ui);
+}
+
+fn procs_render(ui: &MainWindow) {
+    PROCS.with(|p| {
+        let p = p.borrow();
+        let rows: Vec<ProcRow> = p
+            .rows
+            .iter()
+            .map(|r| ProcRow {
+                pid: r.pid as i32,
+                name: r.name.as_str().into(),
+                cpu: procs::fmt_cpu(r.cpu).into(),
+                ws: format!("{} MB", r.ws_mb).into(),
+                protected: procs::protected(r.pid, &r.name),
+                selected: p.selected == Some((r.pid, r.ctime)),
+            })
+            .collect();
+        set_vec(ui.get_procs(), rows, |v| ui.set_procs(v));
+        let sel = p.selected.and_then(|s| p.rows.iter().find(|r| (r.pid, r.ctime) == s));
+        ui.set_proc_can_kill(!p.busy && sel.is_some_and(|r| !procs::protected(r.pid, &r.name)));
+        ui.set_proc_confirm(p.confirm);
+        let status = if p.status.is_empty() { format!("{} süreç", p.rows.len()) } else { p.status.clone() };
+        ui.set_proc_status(status.into());
+    });
+}
+
+/// İki aşama: ilk tık onay ister, ikincisi sonlandırır. Erişim reddinde yükseltilmiş kopya (UAC) ayrı thread'de beklenir.
+fn proc_kill(ui: &MainWindow) {
+    let Some((pid, ctime, name)) = PROCS.with(|p| {
+        let p = p.borrow();
+        let s = p.selected?;
+        p.rows.iter().find(|r| (r.pid, r.ctime) == s).map(|r| (r.pid, r.ctime, r.name.clone()))
+    }) else {
+        return;
+    };
+    let ask = PROCS.with(|p| {
+        let mut p = p.borrow_mut();
+        if p.busy {
+            return None;
+        }
+        p.confirm = !p.confirm;
+        if p.confirm {
+            p.status = format!("{name} (PID {pid}) sonlandırılsın mı?");
+        }
+        Some(p.confirm)
+    });
+    match ask {
+        None => return,
+        Some(true) => return procs_render(ui),
+        Some(false) => {}
+    }
+    let code = kill_now(pid, ctime);
+    #[cfg(windows)]
+    if code == procs::exit::DENIED {
+        PROCS.with(|p| {
+            let mut p = p.borrow_mut();
+            p.busy = true;
+            p.status = format!("{name}: yönetici onayı isteniyor…");
+        });
+        procs_render(ui);
+        let w = ui.as_weak();
+        std::thread::spawn(move || {
+            let code = win::kill_elevated(pid, ctime);
+            let _ = w.upgrade_in_event_loop(move |ui| {
+                PROCS.with(|p| {
+                    let mut p = p.borrow_mut();
+                    p.busy = false;
+                    p.status = procs::exit::text(code, &name);
+                });
+                procs_refresh(&ui);
+            });
+        });
+        return;
+    }
+    PROCS.with(|p| p.borrow_mut().status = procs::exit::text(code, &name));
+    procs_refresh(ui);
+}
+
+#[cfg(windows)]
+fn scan(buf: &mut Vec<u64>) -> Vec<procs::RawProc> {
+    win::scan(buf)
+}
+
+/// Geliştirme (Linux + mock): sabit sahte süreçler, CPU zamanı saatle artar.
+#[cfg(not(windows))]
+fn scan(_: &mut Vec<u64>) -> Vec<procs::RawProc> {
+    let t = now_ms() * 10_000; // 100 ns
+    [("System", 4, 1), ("explorer.exe", 1200, 5), ("firefox.exe", 3400, 160), ("Code.exe", 5100, 70), ("lowdeck-agent.exe", 880, 1), ("lsass.exe", 700, 2)]
+        .iter()
+        .enumerate()
+        .map(|(i, &(name, pid, w))| procs::RawProc {
+            pid,
+            ctime: 1,
+            cpu_100ns: t / 100 * w,
+            ws_bytes: ((i as u64 + 1) * 90) << 20,
+            name: name.into(),
+        })
+        .collect()
+}
+
 /// Agent'ı başlatmayı oturum başına bir kez dene (ADR-0004 madde 3); Windows dışında yok.
 fn start_agent() -> bool {
     #[cfg(windows)]
@@ -141,6 +408,9 @@ struct HistRx {
 }
 
 thread_local! {
+    static CLIENT: std::cell::RefCell<Option<Rc<Client>>> = const { std::cell::RefCell::new(None) };
+    static MINIMIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PROCS: std::cell::RefCell<ProcUi> = std::cell::RefCell::new(ProcUi::default());
     static HQ: std::cell::RefCell<HistRx> = std::cell::RefCell::new(HistRx::default());
     /// Oturumda agent başlatma denendi mi (ilk kopmada bir kez).
     static AGENT_TRIED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
