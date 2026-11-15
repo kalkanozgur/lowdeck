@@ -55,6 +55,12 @@ impl Backend for WinBackend {
     fn media(&self, cmd: MediaCmd) {
         let _ = self.media.send(MediaMsg::Cmd(cmd));
     }
+    fn events(&self, from_ms: u64, to_ms: u64) -> Vec<lowdeck_proto::EventItem> {
+        crate::lowmon::query_events(from_ms, to_ms).unwrap_or_else(|e| {
+            println!("lowmon olay sorgusu: {e}");
+            Vec::new()
+        })
+    }
 }
 
 pub fn start(hub: Arc<Hub>) -> WinBackend {

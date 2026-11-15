@@ -10,8 +10,8 @@
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
-/// v2: `Subscribe` / `Metrics` / `Top` (eski agent yeni varyantı çözemez → sürüm artışı).
-pub const PROTO_VERSION: u16 = 2;
+/// v2: `Subscribe` / `Metrics` / `Top`. v3: olaylar (`TOPIC_EVENTS`, `Alarms`, `Event`, `QueryEvents`; ADR-0003).
+pub const PROTO_VERSION: u16 = 3;
 pub const DEFAULT_PORT: u16 = 47810;
 pub const MAX_FRAME: usize = 4096;
 
@@ -27,12 +27,16 @@ pub enum C2S {
     Media(MediaCmd),
     /// Abone olunan konular (`TOPIC_*` bitleri); 0 = hepsinden çık. Bağlantı başına durum.
     Subscribe(Topics),
+    /// LowMonitor olay geçmişi `[from_ms, to_ms)`: bir ya da birkaç `S2C::Events`, boş `Events` = bitti.
+    QueryEvents { from_ms: u64, to_ms: u64 },
     // İleride (SONA eklenecek): Lock(LockCmd) ...
 }
 
 pub type Topics = u8;
 /// LowMonitor metrikleri (`S2C::Metrics` + `S2C::Top`).
 pub const TOPIC_METRICS: Topics = 1;
+/// LowMonitor alarm/sistem olayları: önce `S2C::Alarms` (aktif liste), sonra her olay `S2C::Event`.
+pub const TOPIC_EVENTS: Topics = 2;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum AudioCmd {
@@ -65,6 +69,28 @@ pub enum S2C {
     Metrics(Option<Metrics>),
     /// Abonelikte Top-N üretildikçe (LowMonitor `topn_every`), CPU'ya göre azalan.
     Top(Vec<TopItem>),
+    /// `TOPIC_EVENTS`: şu an Raised olan LowMonitor kural id'leri.
+    Alarms(Vec<String>),
+    /// `TOPIC_EVENTS`: yeni olay.
+    Event(EventItem),
+    /// `QueryEvents` yanıtı (≤ `EVENTS_PER_FRAME` öğe); boş = bitti.
+    Events(Vec<EventItem>),
+}
+
+/// Bir çerçevedeki en fazla olay; ad `EVENT_NAME_MAX`'ta kırpılır → `MAX_FRAME` aşılmaz.
+pub const EVENTS_PER_FRAME: usize = 50;
+pub const EVENT_NAME_MAX: usize = 32;
+
+/// LowMonitor olayı (LM ADR-0028).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct EventItem {
+    pub ts_ms: u64,
+    /// 0 = AlarmRaise, 1 = AlarmClear, 2 = System.
+    pub kind: u8,
+    /// Kural id'si ya da sistem olayı adı.
+    pub name: String,
+    /// Alarmda değer × 100; sistem olayında koda göre.
+    pub value: i64,
 }
 
 /// Kompakt temsil: postcard varint kodlar, küçük birim = az bayt.
@@ -190,7 +216,8 @@ mod tests {
             C2S::Audio(AudioCmd::Step(-2)),
             C2S::Media(MediaCmd::Next),
             C2S::Ping(7),
-            C2S::Subscribe(TOPIC_METRICS),
+            C2S::Subscribe(TOPIC_METRICS | TOPIC_EVENTS),
+            C2S::QueryEvents { from_ms: 1, to_ms: u64::MAX },
         ];
         let mut wire = Vec::new();
         for m in &msgs {
@@ -237,6 +264,15 @@ mod tests {
         wire.clear();
         write_frame(&mut wire, &t).unwrap();
         assert!(wire.len() < 256, "top {} bayt", wire.len());
+    }
+
+    /// En kötü durum olay çerçevesi sınıra sığar.
+    #[test]
+    fn events_fit_frame() {
+        let e = EventItem { ts_ms: u64::MAX, kind: 2, name: "x".repeat(EVENT_NAME_MAX), value: i64::MIN };
+        let mut wire = Vec::new();
+        write_frame(&mut wire, &S2C::Events(vec![e; EVENTS_PER_FRAME])).unwrap();
+        assert!(wire.len() <= MAX_FRAME, "events {} bayt", wire.len());
     }
 
     #[test]
