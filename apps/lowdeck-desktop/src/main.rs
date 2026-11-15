@@ -9,9 +9,11 @@ mod history;
 #[cfg(windows)]
 mod win;
 
-use history::{nice_scale, History, Sample};
+use history::{nice_scale, series_path, History, Sample};
 use lowdeck_client::{Client, Config, Event};
-use lowdeck_proto::{EventItem, Metrics, TopItem, C2S, DEFAULT_PORT, S2C, TOPIC_EVENTS, TOPIC_METRICS};
+use lowdeck_proto::{
+    EventItem, HistPoint, Metrics, TopItem, C2S, DEFAULT_PORT, HIST_POINTS_MAX, S2C, TOPIC_EVENTS, TOPIC_METRICS,
+};
 use slint::{Model, ModelRc, VecModel};
 use std::rc::Rc;
 
@@ -85,6 +87,26 @@ fn start_client(ui: &MainWindow, events: Rc<VecModel<EventRow>>, port: u16, toke
         });
     }
 
+    // Geçmiş sekmesi: düğme / sekmeye geçiş → tek sorgu (ADR-0005); otomatik yenileme yok.
+    {
+        let (client, weak) = (client.clone(), ui.as_weak());
+        ui.on_query_history(move |span| {
+            let Some(ui) = weak.upgrade() else { return };
+            let now = now_ms();
+            let from_ms = now.saturating_sub(HIST_SPANS_MS[span.clamp(0, 3) as usize]);
+            if client.send(&C2S::QueryHistory { from_ms, to_ms: now, points: HIST_POINTS_MAX }) {
+                HQ.with(|h| {
+                    let mut h = h.borrow_mut();
+                    h.pending += 1;
+                    h.pts.clear();
+                });
+                ui.set_hist_status("Yükleniyor…".into());
+            } else {
+                ui.set_hist_status("Agent'a bağlı değil".into());
+            }
+        });
+    }
+
     let query = move || {
         events.set_vec(Vec::new());
         let now = now_ms();
@@ -103,7 +125,23 @@ fn start_agent() -> bool {
     false
 }
 
+/// Geçmiş aralıkları (UI düğme sırası): 1 sa, 6 sa, 24 sa, 7 g.
+const HIST_SPANS_MS: [u64; 4] = [3_600_000, 6 * 3_600_000, 24 * 3_600_000, 7 * 24 * 3_600_000];
+
+/// Geçmiş yanıt tamponu. `pending` = yanıtı bitmemiş sorgu sayısı: yalnız sonuncusunun parçaları tutulur
+/// (öncekilerin parçaları `pending > 1` iken gelir, atılır).
+#[derive(Default)]
+struct HistRx {
+    pending: u32,
+    from_ms: u64,
+    step_ms: u64,
+    pts: Vec<Option<HistPoint>>,
+    /// Son `Metrics`'ten; RAM grafiği ölçeği (yoksa geçmişteki max).
+    ram_total_mb: u32,
+}
+
 thread_local! {
+    static HQ: std::cell::RefCell<HistRx> = std::cell::RefCell::new(HistRx::default());
     /// Oturumda agent başlatma denendi mi (ilk kopmada bir kez).
     static AGENT_TRIED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static QUERY: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
@@ -152,6 +190,8 @@ fn apply(ui: &MainWindow, ev: Event, offset: i64) {
             ui.set_lm_state(0);
             ui.set_alarms("".into());
             clear_graphs(ui);
+            HQ.with(|h| h.borrow_mut().pending = 0); // yanıtlar kayboldu
+            ui.set_hist_status("".into());
         }
         Event::Msg(S2C::Metrics(None)) => {
             ui.set_lm_state(2);
@@ -175,6 +215,26 @@ fn apply(ui: &MainWindow, ev: Event, offset: i64) {
         }
         // Parçalar eskiden yeniye gelir; her biri başa eklenince liste yeniden eskiye sıralı kalır.
         Event::Msg(S2C::Events(v)) => prepend(ui, &v, offset),
+        Event::Msg(S2C::History { from_ms, step_ms, points }) => {
+            let done = HQ.with(|h| {
+                let mut h = h.borrow_mut();
+                if h.pending == 0 {
+                    return false;
+                }
+                if points.is_empty() {
+                    h.pending -= 1;
+                    return h.pending == 0;
+                }
+                if h.pending == 1 {
+                    (h.from_ms, h.step_ms) = (from_ms, step_ms);
+                    h.pts.extend(points);
+                }
+                false
+            });
+            if done {
+                draw_history(ui, offset);
+            }
+        }
         Event::Msg(_) => {}
     }
 }
@@ -210,8 +270,41 @@ fn event_row(e: &EventItem, offset: i64) -> EventRow {
     }
 }
 
+/// Tamamlanan geçmiş yanıtından 7 çizgi + ölçek etiketleri.
+fn draw_history(ui: &MainWindow, offset: i64) {
+    HQ.with(|h| {
+        let h = h.borrow();
+        let pts = &h.pts;
+        let mut buf = String::new();
+        let mut line = |f: &dyn Fn(&HistPoint) -> f32, set: &dyn Fn(&MainWindow, slint::SharedString)| {
+            series_path(pts.iter().map(|p| p.as_ref().map(f)), &mut buf);
+            set(ui, buf.as_str().into());
+        };
+        let max = |f: &dyn Fn(&HistPoint) -> u32| pts.iter().flatten().map(f).max().unwrap_or(0);
+        line(&|p| p.cpu_avg as f32 / 10_000.0, &MainWindow::set_hist_cpu_avg);
+        line(&|p| p.cpu_max as f32 / 10_000.0, &MainWindow::set_hist_cpu_max);
+        let ram = if h.ram_total_mb > 0 { h.ram_total_mb } else { max(&|p| p.ram_mb).max(1) } as f32;
+        line(&|p| p.ram_mb as f32 / ram, &MainWindow::set_hist_ram);
+        let disk = nice_scale(max(&|p| p.disk_r_kbps.max(p.disk_w_kbps))) as f32;
+        line(&|p| p.disk_r_kbps as f32 / disk, &MainWindow::set_hist_disk_r);
+        line(&|p| p.disk_w_kbps as f32 / disk, &MainWindow::set_hist_disk_w);
+        let net = nice_scale(max(&|p| p.net_rx_kbps.max(p.net_tx_kbps))) as f32;
+        line(&|p| p.net_rx_kbps as f32 / net, &MainWindow::set_hist_net_rx);
+        line(&|p| p.net_tx_kbps as f32 / net, &MainWindow::set_hist_net_tx);
+        ui.set_hist_ram_scale(format!("{:.0} GB", ram / 1024.0).into());
+        ui.set_hist_disk_scale(rate(disk as u32).into());
+        ui.set_hist_net_scale(rate(net as u32).into());
+        ui.set_hist_n(pts.len().max(1) as f32);
+        let to_ms = h.from_ms + h.step_ms * pts.len() as u64;
+        ui.set_hist_range(format!("{} – {}", fmt_time(h.from_ms, offset), fmt_time(to_ms, offset)).into());
+        let empty = pts.iter().all(Option::is_none);
+        ui.set_hist_status(if empty { "Veri yok (LowMonitor servisi?)" } else { "" }.into());
+    });
+}
+
 fn show_metrics(ui: &MainWindow, m: &Metrics) {
     ui.set_lm_state(1);
+    HQ.with(|h| h.borrow_mut().ram_total_mb = m.ram_total_mb);
     ui.set_lm_cpu(format!("{:.0}%", m.cpu as f32 / 100.0).into());
     ui.set_lm_ram(format!("{:.1} / {:.0} GB", m.ram_used_mb as f32 / 1024.0, m.ram_total_mb as f32 / 1024.0).into());
     ui.set_lm_disk(format!("R {}  W {}", rate(m.disk_r_kbps), rate(m.disk_w_kbps)).into());

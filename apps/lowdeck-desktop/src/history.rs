@@ -83,6 +83,27 @@ impl History {
     }
 }
 
+/// Kova serisi → SVG path, viewbox `n`×100: x = kova indeksi, `None` → çizgi kopar.
+/// Tek noktalı alt yol 1 birimlik yatay çizgi olur (görünsün).
+pub fn series_path(vals: impl Iterator<Item = Option<f32>>, out: &mut String) {
+    out.clear();
+    let mut it = vals.enumerate().peekable();
+    let mut in_seg = false;
+    while let Some((i, v)) = it.next() {
+        let Some(v) = v else {
+            in_seg = false;
+            continue;
+        };
+        let y = 100.0 * (1.0 - v.clamp(0.0, 1.0));
+        let _ = write!(out, "{}{i} {y:.1}", if in_seg { 'L' } else { 'M' });
+        let next_some = matches!(it.peek(), Some((_, Some(_))));
+        if !in_seg && !next_some {
+            let _ = write!(out, "h1");
+        }
+        in_seg = true;
+    }
+}
+
 /// Disk/ağ ölçeği (KB/s): 1024·{1, 2, 5}·10^k, en az 1024 (= "1.0M"; boşta gürültü tepe gibi görünmesin).
 /// 1024 tabanı `rate()` etiketini yuvarlak tutar: 2.0M, 5.0M, 10.0M, 1.0G…
 pub fn nice_scale(max_kbps: u32) -> u32 {
@@ -150,6 +171,15 @@ mod tests {
         h.path(1000, cpu, &mut out);
         assert!(out.is_empty());
         assert_eq!(h.max(400, |s| s.ts_s as u32), 400);
+    }
+
+    #[test]
+    fn series() {
+        let mut out = String::new();
+        series_path([Some(0.5), Some(1.0), None, Some(0.0), None].into_iter(), &mut out);
+        assert_eq!(out, "M0 50.0L1 0.0M3 100.0h1");
+        series_path([None, None].into_iter(), &mut out);
+        assert!(out.is_empty());
     }
 
     #[test]
