@@ -9,6 +9,7 @@ global Theme {
     out property <color> text: #e6e6e6;
     out property <color> dim: #8a8a8a;
     out property <color> accent: #4fc3f7;
+    out property <color> accent2: #ba68c8;
     out property <color> warn: #ff7043;
     out property <color> ok: #66bb6a;
     out property <color> disabled: #3a3a3a;
@@ -35,13 +36,54 @@ component Tab inherits Rectangle {
     }
 }
 
+// 5 dk çizgisi (LM spek §9.1): path'ler Rust'ta üretilir (viewbox 300 s × 100), yalnız yeni örnekte değişir.
+component Spark inherits Rectangle {
+    in property <string> a;
+    in property <string> b; // "" = tek çizgi
+    in property <color> ca;
+    in property <color> cb;
+    in property <string> scale; // "" = sabit 0..%100 ölçek, etiket yok
+    height: 56px;
+    if root.a != "": Path {
+        width: 100%;
+        height: 100%;
+        commands: root.a;
+        viewbox-width: 300;
+        viewbox-height: 100;
+        stroke: root.ca;
+        stroke-width: 1.5px;
+    }
+    if root.b != "": Path {
+        width: 100%;
+        height: 100%;
+        commands: root.b;
+        viewbox-width: 300;
+        viewbox-height: 100;
+        stroke: root.cb;
+        stroke-width: 1.5px;
+    }
+    if root.scale != "": Text {
+        // Sol üst: yeni veri sağ kenarda çizilir, etiket çizgiyi örtmesin.
+        x: 0;
+        y: 0;
+        text: root.scale;
+        color: Theme.dim;
+        font-size: 10px;
+    }
+}
+
 component Stat inherits Rectangle {
     in property <string> label;
     in property <string> value;
     in property <bool> live;
+    in property <string> path-a;
+    in property <string> path-b;
+    in property <color> color-a: Theme.accent;
+    in property <color> color-b: Theme.accent2;
+    in property <string> scale;
     background: Theme.surface;
     border-radius: 8px;
-    min-height: 64px;
+    min-height: 124px;
     horizontal-stretch: 1;
     VerticalLayout {
         padding: 10px;
@@ -53,6 +95,13 @@ component Stat inherits Rectangle {
             font-size: 22px;
             overflow: elide;
         }
+        Spark {
+            a: root.path-a;
+            b: root.path-b;
+            ca: root.live ? root.color-a : Theme.disabled;
+            cb: root.live ? root.color-b : Theme.disabled;
+            scale: root.scale;
+        }
     }
 }
 
@@ -61,7 +110,7 @@ export component MainWindow inherits Window {
     title: "LowMonitor";
     background: Theme.bg;
     preferred-width: 760px;
-    preferred-height: 520px;
+    preferred-height: 580px;
     min-width: 520px;
     min-height: 360px;
 
@@ -73,6 +122,15 @@ export component MainWindow inherits Window {
     in property <string> lm-disk;
     in property <string> lm-net;
     in property <[float]> lm-cores; // 0..1
+    // 5 dk grafikleri (SVG path); disk/ağ ölçeği iki çizginin ortak max'ı
+    in property <string> lm-cpu-path;
+    in property <string> lm-ram-path;
+    in property <string> lm-disk-r-path;
+    in property <string> lm-disk-w-path;
+    in property <string> lm-net-rx-path;
+    in property <string> lm-net-tx-path;
+    in property <string> lm-disk-scale;
+    in property <string> lm-net-scale;
     in property <[TopRow]> lm-top;
     in property <string> alarms; // "" = aktif alarm yok
     in property <[EventRow]> events; // yeni → eski
@@ -126,10 +184,25 @@ export component MainWindow inherits Window {
             spacing: 12px;
             HorizontalLayout {
                 spacing: 12px;
-                Stat { label: "CPU"; value: root.lm-cpu; live: root.live; }
-                Stat { label: "RAM"; value: root.lm-ram; live: root.live; }
-                Stat { label: "DİSK  B/s"; value: root.lm-disk; live: root.live; }
-                Stat { label: "AĞ  B/s"; value: root.lm-net; live: root.live; }
+                Stat { label: "CPU  5 dk"; value: root.lm-cpu; live: root.live; path-a: root.lm-cpu-path; }
+                Stat { label: "RAM  5 dk"; value: root.lm-ram; live: root.live; path-a: root.lm-ram-path; }
+                Stat {
+                    label: "DİSK  B/s";
+                    value: root.lm-disk;
+                    live: root.live;
+                    path-a: root.lm-disk-r-path;
+                    path-b: root.lm-disk-w-path;
+                    scale: root.lm-disk-scale;
+                }
+                Stat {
+                    label: "AĞ  B/s";
+                    value: root.lm-net;
+                    live: root.live;
+                    path-a: root.lm-net-rx-path;
+                    path-b: root.lm-net-tx-path;
+                    color-a: Theme.ok;
+                    scale: root.lm-net-scale;
+                }
             }
             // Mutlak konum: `for` içeren layout boşken max-width = 0 verir (telefon UI'ı notu).
             bars := Rectangle {

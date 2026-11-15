@@ -13,6 +13,7 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 - Agent tray ikonu + menü (telefon ayarı, ayar dosyası, Windows ile başlat, çıkış); konsol penceresi yok
 - Agent tray → Ayarı yeniden yükle (yeniden başlatmadan); yanlış `bind` IP'si için açıklayıcı hata
 - Telefonda **PC** bölümü: LowMonitor'dan CPU (toplam + çekirdek çubukları), RAM, disk, ağ ve Top-5 süreç; agent `\\.\pipe\LowMonitor`'a yalnız telefon aboneyken bağlanır. Servis yoksa "LowMonitor servisi yok". Mock sahte metrik üretir.
+- Masaüstü (LowMonitor arayüzü) Canlı sekmesi: CPU, RAM, disk (R/W) ve ağ (↓/↑) kartlarında son 5 dk çizgisi; disk/ağ oto-ölçek (1-2-5), küçültme/kopma boşluğunda çizgi kopar
 ### Düzeltildi
 - Karşı taraf bağlantıyı temiz kapatınca `io: failed to fill whole buffer` yerine `bağlantı kapandı` raporlanır
 ### Değişti

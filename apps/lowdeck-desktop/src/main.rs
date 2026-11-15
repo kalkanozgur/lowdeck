@@ -5,9 +5,11 @@
 
 slint::include_modules!();
 
+mod history;
 #[cfg(windows)]
 mod win;
 
+use history::{nice_scale, History, Sample};
 use lowdeck_client::{Client, Config, Event};
 use lowdeck_proto::{EventItem, Metrics, TopItem, C2S, DEFAULT_PORT, S2C, TOPIC_EVENTS, TOPIC_METRICS};
 use slint::{Model, ModelRc, VecModel};
@@ -73,6 +75,8 @@ fn main() -> Result<(), slint::PlatformError> {
 
 thread_local! {
     static QUERY: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
+    /// Canlı grafik geçmişi + path buffer'ı (yalnız event loop thread'i).
+    static HIST: std::cell::RefCell<(History, String)> = std::cell::RefCell::new((History::default(), String::new()));
 }
 
 /// (port, token): argümanlar, yoksa `%APPDATA%\LowDeck\agent.cfg`.
@@ -114,9 +118,11 @@ fn apply(ui: &MainWindow, ev: Event, offset: i64) {
             ui.set_status(format!("Agent yok: {reason}").into());
             ui.set_lm_state(0);
             ui.set_alarms("".into());
+            clear_graphs(ui);
         }
         Event::Msg(S2C::Metrics(None)) => {
             ui.set_lm_state(2);
+            clear_graphs(ui);
             set_vec(ui.get_lm_cores(), Vec::new(), |v| ui.set_lm_cores(v));
             set_vec(ui.get_lm_top(), Vec::new(), |v| ui.set_lm_top(v));
         }
@@ -179,6 +185,52 @@ fn show_metrics(ui: &MainWindow, m: &Metrics) {
     ui.set_lm_net(format!("↓ {}  ↑ {}", rate(m.net_rx_kbps), rate(m.net_tx_kbps)).into());
     let cores = m.cores.iter().map(|&c| c as f32 / 200.0).collect();
     set_vec(ui.get_lm_cores(), cores, |v| ui.set_lm_cores(v));
+    graphs(ui, m, now_ms() / 1000);
+}
+
+/// Örneği geçmişe ekler, 6 çizgi + 2 ölçek etiketini günceller (Metrics başına bir kez, ≈ 1 Hz).
+fn graphs(ui: &MainWindow, m: &Metrics, now_s: u64) {
+    HIST.with(|h| {
+        let (h, buf) = &mut *h.borrow_mut();
+        h.push(Sample {
+            ts_s: now_s,
+            cpu: m.cpu,
+            ram: m.ram_used_mb as f32 / m.ram_total_mb.max(1) as f32,
+            dr: m.disk_r_kbps,
+            dw: m.disk_w_kbps,
+            rx: m.net_rx_kbps,
+            tx: m.net_tx_kbps,
+        });
+        let mut line = |f: &dyn Fn(&Sample) -> f32, set: &dyn Fn(slint::SharedString)| {
+            h.path(now_s, f, buf);
+            set(buf.as_str().into());
+        };
+        line(&|s| s.cpu as f32 / 10_000.0, &|v| ui.set_lm_cpu_path(v));
+        line(&|s| s.ram, &|v| ui.set_lm_ram_path(v));
+        // Disk/ağ: iki çizgi ortak ölçekte (penceredeki max, 1-2-5 yuvarlama).
+        let disk = nice_scale(h.max(now_s, |s| s.dr.max(s.dw))) as f32;
+        line(&|s| s.dr as f32 / disk, &|v| ui.set_lm_disk_r_path(v));
+        line(&|s| s.dw as f32 / disk, &|v| ui.set_lm_disk_w_path(v));
+        let net = nice_scale(h.max(now_s, |s| s.rx.max(s.tx))) as f32;
+        line(&|s| s.rx as f32 / net, &|v| ui.set_lm_net_rx_path(v));
+        line(&|s| s.tx as f32 / net, &|v| ui.set_lm_net_tx_path(v));
+        ui.set_lm_disk_scale(rate(disk as u32).into());
+        ui.set_lm_net_scale(rate(net as u32).into());
+    });
+}
+
+fn clear_graphs(ui: &MainWindow) {
+    HIST.with(|h| h.borrow_mut().0.clear());
+    for set in [
+        MainWindow::set_lm_cpu_path,
+        MainWindow::set_lm_ram_path,
+        MainWindow::set_lm_disk_r_path,
+        MainWindow::set_lm_disk_w_path,
+        MainWindow::set_lm_net_rx_path,
+        MainWindow::set_lm_net_tx_path,
+    ] {
+        set(ui, "".into());
+    }
 }
 
 fn top_row(t: &TopItem) -> TopRow {
