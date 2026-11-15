@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
 /// v2: `Subscribe` / `Metrics` / `Top`. v3: olaylar (`TOPIC_EVENTS`, `Alarms`, `Event`, `QueryEvents`; ADR-0003).
-pub const PROTO_VERSION: u16 = 3;
+/// v4: metrik geçmişi (`QueryHistory`, `History`; ADR-0005).
+pub const PROTO_VERSION: u16 = 4;
 pub const DEFAULT_PORT: u16 = 47810;
 pub const MAX_FRAME: usize = 4096;
 
@@ -29,6 +30,9 @@ pub enum C2S {
     Subscribe(Topics),
     /// LowMonitor olay geçmişi `[from_ms, to_ms)`: bir ya da birkaç `S2C::Events`, boş `Events` = bitti.
     QueryEvents { from_ms: u64, to_ms: u64 },
+    /// LowMonitor metrik geçmişi `[from_ms, to_ms)`, `points` kovaya bölünmüş (≤ `HIST_POINTS_MAX`, sunucu kırpar).
+    /// Yanıt: bir ya da birkaç `S2C::History`, boş `points` = bitti.
+    QueryHistory { from_ms: u64, to_ms: u64, points: u16 },
     // İleride (SONA eklenecek): Lock(LockCmd) ...
 }
 
@@ -75,6 +79,28 @@ pub enum S2C {
     Event(EventItem),
     /// `QueryEvents` yanıtı (≤ `EVENTS_PER_FRAME` öğe); boş = bitti.
     Events(Vec<EventItem>),
+    /// `QueryHistory` yanıt parçası (≤ `HIST_PER_FRAME` kova), sırayla; boş `points` = bitti.
+    /// Kova i: `[from_ms + i·step_ms, +step_ms)` (i, baştan itibaren tüm parçalarda sürer). `None` = veri yok.
+    History { from_ms: u64, step_ms: u64, points: Vec<Option<HistPoint>> },
+}
+
+/// Bir sorgudaki en fazla kova (masaüstü grafiği genişliği).
+pub const HIST_POINTS_MAX: u16 = 600;
+/// Bir çerçevedeki en fazla kova; en kötü ~32 B/kova → `MAX_FRAME` aşılmaz (test).
+pub const HIST_PER_FRAME: usize = 100;
+
+/// Geçmiş kovası: `Metrics` birimleri, değerler kova ortalaması (`cpu_max` hariç).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+pub struct HistPoint {
+    /// Toplam CPU, 0.01 %.
+    pub cpu_avg: u16,
+    /// Kovadaki en yüksek toplam CPU (dakika özetinde `Max`), 0.01 %.
+    pub cpu_max: u16,
+    pub ram_mb: u32,
+    pub disk_r_kbps: u32,
+    pub disk_w_kbps: u32,
+    pub net_rx_kbps: u32,
+    pub net_tx_kbps: u32,
 }
 
 /// Bir çerçevedeki en fazla olay; ad `EVENT_NAME_MAX`'ta kırpılır → `MAX_FRAME` aşılmaz.
@@ -273,6 +299,24 @@ mod tests {
         let mut wire = Vec::new();
         write_frame(&mut wire, &S2C::Events(vec![e; EVENTS_PER_FRAME])).unwrap();
         assert!(wire.len() <= MAX_FRAME, "events {} bayt", wire.len());
+    }
+
+    /// En kötü durum geçmiş çerçevesi sınıra sığar.
+    #[test]
+    fn history_fits_frame() {
+        let p = HistPoint {
+            cpu_avg: u16::MAX,
+            cpu_max: u16::MAX,
+            ram_mb: u32::MAX,
+            disk_r_kbps: u32::MAX,
+            disk_w_kbps: u32::MAX,
+            net_rx_kbps: u32::MAX,
+            net_tx_kbps: u32::MAX,
+        };
+        let msg = S2C::History { from_ms: u64::MAX, step_ms: u64::MAX, points: vec![Some(p); HIST_PER_FRAME] };
+        let mut wire = Vec::new();
+        write_frame(&mut wire, &msg).unwrap();
+        assert!(wire.len() <= MAX_FRAME, "history {} bayt", wire.len());
     }
 
     #[test]
