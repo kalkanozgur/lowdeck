@@ -30,12 +30,38 @@ fn main() -> Result<(), slint::PlatformError> {
     let ui = MainWindow::new()?;
     let events = Rc::new(VecModel::<EventRow>::default());
     ui.set_events(ModelRc::from(events.clone()));
-
-    let Some((port, token)) = target() else {
-        ui.set_status("agent.cfg yok: LowDeck agent'ı bir kez çalıştırın".into());
-        return ui.run();
-    };
     let offset = local_offset_s();
+
+    match target() {
+        Some((port, token)) => start_client(&ui, events, port, token, offset),
+        // İlk kurulum: cfg'yi agent oluşturur (ADR-0004 madde 4).
+        None if start_agent() => {
+            AGENT_TRIED.with(|t| t.set(true));
+            ui.set_status("Agent başlatılıyor…".into());
+            retry_cfg(ui.as_weak(), events, offset, 1);
+        }
+        None => ui.set_status("agent.cfg yok: LowDeck agent'ı bir kez çalıştırın".into()),
+    }
+    ui.run()
+}
+
+/// `agent.cfg` yeniden okuma denemesi sayısı (1 s aralık); sonra durur, periyodik iş kalmaz.
+const CFG_RETRIES: u32 = 5;
+
+/// Tek-atışlık timer zinciri: cfg gelince istemci başlar, `CFG_RETRIES` sonra vazgeçer.
+fn retry_cfg(weak: slint::Weak<MainWindow>, events: Rc<VecModel<EventRow>>, offset: i64, n: u32) {
+    slint::Timer::single_shot(std::time::Duration::from_secs(1), move || {
+        let Some(ui) = weak.upgrade() else { return };
+        match target() {
+            Some((port, token)) => start_client(&ui, events, port, token, offset),
+            None if n < CFG_RETRIES => retry_cfg(weak, events, offset, n + 1),
+            None => ui.set_status("agent.cfg oluşmadı: %APPDATA%\\LowDeck\\agent.cfg".into()),
+        }
+    });
+}
+
+/// İstemciyi başlatır; `Rc<Client>` kancaların (küçültme, Yenile, bağlanınca geçmiş) closure'larında yaşar.
+fn start_client(ui: &MainWindow, events: Rc<VecModel<EventRow>>, port: u16, token: String, offset: i64) {
     let weak = ui.as_weak();
     let client = Rc::new(Client::start(
         Config { host: "127.0.0.1".into(), port, token, name: "LowMonitor arayüzü".into() },
@@ -59,21 +85,27 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    let query = {
-        let (client, events) = (client.clone(), events.clone());
-        move || {
-            events.set_vec(Vec::new());
-            let now = now_ms();
-            client.send(&C2S::QueryEvents { from_ms: now.saturating_sub(HISTORY_MS), to_ms: u64::MAX });
-        }
+    let query = move || {
+        events.set_vec(Vec::new());
+        let now = now_ms();
+        client.send(&C2S::QueryEvents { from_ms: now.saturating_sub(HISTORY_MS), to_ms: u64::MAX });
     };
     ui.on_refresh_events(query.clone());
     // Her bağlanışta geçmiş yeniden istenir: `apply` Connected'ı görünce bu kancayı çağırır.
     QUERY.with(|q| *q.borrow_mut() = Some(Box::new(query)));
-    ui.run()
+}
+
+/// Agent'ı başlatmayı oturum başına bir kez dene (ADR-0004 madde 3); Windows dışında yok.
+fn start_agent() -> bool {
+    #[cfg(windows)]
+    return win::start_agent();
+    #[cfg(not(windows))]
+    false
 }
 
 thread_local! {
+    /// Oturumda agent başlatma denendi mi (ilk kopmada bir kez).
+    static AGENT_TRIED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static QUERY: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
     /// Canlı grafik geçmişi + path buffer'ı (yalnız event loop thread'i).
     static HIST: std::cell::RefCell<(History, String)> = std::cell::RefCell::new((History::default(), String::new()));
@@ -115,7 +147,8 @@ fn apply(ui: &MainWindow, ev: Event, offset: i64) {
         }
         Event::Disconnected { reason } => {
             ui.set_connected(false);
-            ui.set_status(format!("Agent yok: {reason}").into());
+            let starting = !AGENT_TRIED.with(|t| t.replace(true)) && start_agent();
+            ui.set_status(if starting { "Agent başlatılıyor…".into() } else { format!("Agent yok: {reason}").into() });
             ui.set_lm_state(0);
             ui.set_alarms("".into());
             clear_graphs(ui);
