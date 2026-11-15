@@ -12,6 +12,7 @@ Eski **Xiaomi Mi Note 10 Lite** (toco, SD730G, AMOLED) telefonu aynı LAN'daki W
 | Medya kontrolü (play/pause, ileri, geri) + çalan parça bilgisi | **Faz 1 — şimdi** |
 | Tuş kilidi (kedi-kilit tetikleme ya da ajan içinde hook) | **Sonra**, karar verilmedi |
 | LowMonitor kaynak verisini telefonda gösterme | Sonra |
+| LowMonitor PC arayüzü (masaüstü; Canlı + Olaylar), agent köprüsü | Sıradaki ([ADR-0003](docs/kararlar/ADR-0003-agent-lowmonitor-koprusu.md), LM ADR-0029) |
 
 **Öncelik: telefon tarafı.** PC tarafı ayrı, küçük bir exe: `tools/lowdeck-agent` (Rust, kullanıcı oturumu, ADR-0002). O hazır olana kadar `tools/mock-server` kullanılır.
 
