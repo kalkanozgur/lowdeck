@@ -12,7 +12,7 @@ Eski Xiaomi Mi Note 10 Lite'ı aynı LAN'daki Windows PC için minimum tüketiml
 crates/lowdeck-proto     protokol tipleri + çerçeveleme
 crates/lowdeck-client    UI'dan bağımsız istemci
 apps/lowdeck-phone       Slint uygulaması (Android + masaüstü)
-apps/lowdeck-desktop     LowMonitor PC arayüzü (Canlı + Olaylar + Geçmiş, agent loopback)
+apps/lowdeck-desktop     LowMonitor PC arayüzü (Canlı, Olaylar, Geçmiş, Süreçler; agent loopback)
 tools/mock-server        sahte PC sunucusu
 tools/lowdeck-agent      gerçek PC sunucusu (Windows: Core Audio + SMTC)
 docs/                    PROTOCOL, gereksinimler, devlog, kararlar

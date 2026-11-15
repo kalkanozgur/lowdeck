@@ -3,6 +3,7 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 
 ## [Unreleased]
 ### Eklendi
+- Masaüstü **Süreçler** sekmesi: tüm süreçler (CPU/RAM sıralı, 2 s, yalnız sekme açıkken), iki aşamalı onayla **Sonlandır**; PID yeniden kullanım kontrolü, korumalı süreçler, yetki yetmezse UAC ile yükseltilmiş kopya (ADR-0006)
 - Protokol v1 (TCP + postcard), istemci, mock sunucu, Slint masaüstü ekranı
 - CI (APK artifact) ve onaylı release workflow'ları
 - Proje iskeleti (README, TODO, devlog, ADR, gereksinimler)

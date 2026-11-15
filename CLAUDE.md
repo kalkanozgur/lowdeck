@@ -12,7 +12,7 @@ Eski **Xiaomi Mi Note 10 Lite** (toco, SD730G, AMOLED) telefonu aynı LAN'daki W
 | Medya kontrolü (play/pause, ileri, geri) + çalan parça bilgisi | **Faz 1 — şimdi** |
 | Tuş kilidi (kedi-kilit tetikleme ya da ajan içinde hook) | **Sonra**, karar verilmedi |
 | LowMonitor kaynak verisini telefonda gösterme | Sonra |
-| LowMonitor PC arayüzü (masaüstü; Canlı + Olaylar + Geçmiş), agent köprüsü | Var ([ADR-0003](docs/kararlar/ADR-0003-agent-lowmonitor-koprusu.md), [ADR-0005](docs/kararlar/ADR-0005-gecmis-sorgusu.md), LM ADR-0029) |
+| LowMonitor PC arayüzü (masaüstü; Canlı, Olaylar, Geçmiş, Süreçler), agent köprüsü | Var ([ADR-0003](docs/kararlar/ADR-0003-agent-lowmonitor-koprusu.md), [ADR-0005](docs/kararlar/ADR-0005-gecmis-sorgusu.md), [ADR-0006](docs/kararlar/ADR-0006-surecler-ve-sonlandirma.md), LM ADR-0029) |
 
 **Öncelik: telefon tarafı.** PC tarafı ayrı, küçük bir exe: `tools/lowdeck-agent` (Rust, kullanıcı oturumu, ADR-0002). O hazır olana kadar `tools/mock-server` kullanılır.
 
@@ -81,7 +81,7 @@ adb install -r lowdeck-*.apk        # telefona kur (USB hata ayıklama açıksa)
 ## 5. Kodlama kuralları
 ### Tüketim (öncelik 1)
 - **Sürekli Timer, animasyon, polling yasak.** Yeniden çizim yalnızca property değişince olur. Yeni periyodik iş eklemeden önce kullanıcıya sor.
-- Tek periyodik uyanma: istemcideki Ping (25 s). İstisna: boşta perde timer'ı tek-atışlık, dokunuşta yeniden kurulur (periyodik değil). Ölü bağlantı tespiti `READ_TIMEOUT` (60 s) ile.
+- Tek periyodik uyanma: istemcideki Ping (25 s). Masaüstü istisnası: Süreçler sekmesi açıkken 2 s tarama (ADR-0006). İstisna: boşta perde timer'ı tek-atışlık, dokunuşta yeniden kurulur (periyodik değil). Ölü bağlantı tespiti `READ_TIMEOUT` (60 s) ile.
 - Arka plan rengi saf siyah (`#000000`): AMOLED'de siyah piksel güç harcamaz. Büyük beyaz/açık alan kullanılmaz.
 - Slider gibi sürekli girdiler throttle'lanır (şu an 50 ms ≈ 20 Hz). Son değer tek seferlik timer'la mutlaka gönderilir.
 - Okuma döngüsünde tahsis yok (çerçeve buffer'ı yeniden kullanılır). Yeni bağımlılık eklemeden önce boyut ve gerekçe söylenir.
