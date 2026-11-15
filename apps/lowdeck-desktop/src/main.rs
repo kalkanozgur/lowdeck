@@ -43,6 +43,20 @@ fn main() -> Result<(), slint::PlatformError> {
     ));
     client.subscribe(TOPIC_METRICS | TOPIC_EVENTS);
 
+    // Küçültülünce metrik düşer (agent abone kalmazsa pipe'ı kapatır); olaylar sürer: alarm bandı + liste güncel.
+    {
+        use slint::winit_030::{winit::event::WindowEvent, EventResult, WinitWindowAccessor};
+        let client = client.clone();
+        ui.window().on_winit_window_event(move |_, ev| {
+            // Windows'ta küçültme = 0×0 Resized
+            if let WindowEvent::Resized(s) = ev {
+                let minimized = s.width == 0 && s.height == 0;
+                client.subscribe(if minimized { TOPIC_EVENTS } else { TOPIC_METRICS | TOPIC_EVENTS });
+            }
+            EventResult::Propagate
+        });
+    }
+
     let query = {
         let (client, events) = (client.clone(), events.clone());
         move || {
@@ -126,15 +140,25 @@ fn apply(ui: &MainWindow, ev: Event, offset: i64) {
     }
 }
 
-// shortcut: geçmiş sorgusu sürerken gelen canlı olay listede iki kez görünebilir; nadir, gerekirse ts+ad ile tekilleştir
+/// Geçmiş sorgusu sürerken gelen canlı olay geçmişte de olabilir: baştaki satırlarda aynısı varsa eklenmez.
 fn prepend(ui: &MainWindow, v: &[EventItem], offset: i64) {
     let model = ui.get_events();
     let Some(m) = model.as_any().downcast_ref::<VecModel<EventRow>>() else { return };
     for e in v {
-        m.insert(0, event_row(e, offset));
+        add(m, event_row(e, offset));
     }
     while m.row_count() > EVENTS_MAX {
         m.remove(m.row_count() - 1);
+    }
+}
+
+/// Çift kontrolü için bakılan baş satır sayısı (sorgu süresince gelebilecek canlı olaylardan fazla).
+const DEDUP_ROWS: usize = 50;
+
+/// Başa ekler; aynı saniye + tür + ad baştaki satırlarda varsa (aynı olay) eklemez.
+fn add(m: &VecModel<EventRow>, row: EventRow) {
+    if !m.iter().take(DEDUP_ROWS).any(|r| r.time == row.time && r.kind == row.kind && r.name == row.name) {
+        m.insert(0, row);
     }
 }
 
@@ -218,6 +242,17 @@ mod tests {
         // 2025-11-15 13:40:05 UTC, TSİ +3
         assert_eq!(fmt_time(1_763_214_005_000, 3 * 3600), "2025-11-15 16:40:05");
         assert_eq!(fmt_time(951_782_400_000, 0), "2000-02-29 00:00:00");
+    }
+
+    #[test]
+    fn dedup() {
+        let m = VecModel::default();
+        let e = |ts, kind| event_row(&EventItem { ts_ms: ts, kind, name: "cpu".into(), value: 1 }, 0);
+        add(&m, e(1_000, 0)); // canlı
+        add(&m, e(500, 2));
+        add(&m, e(1_400, 0)); // geçmişten aynı olay (aynı saniye)
+        add(&m, e(1_000, 1)); // farklı tür
+        assert_eq!(m.row_count(), 3);
     }
 
     #[test]
