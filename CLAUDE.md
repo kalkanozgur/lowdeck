@@ -114,8 +114,8 @@ APK'lar GitHub Actions'ta derlenir. Lokalde sadece Rust + masaüstü build gerek
 
 | Workflow | Tetik | Ne yapar |
 |---|---|---|
-| `.github/workflows/ci.yml` | PR, main push | test + clippy → imzalı APK → **artifact** (14 gün) |
-| `.github/workflows/release.yml` | `v*` tag push | imzalı APK (onay = tag push; ortam onayı yok, bkz. not) → GitHub Release (+ sha256) |
+| `.github/workflows/ci.yml` | PR, main push | test + clippy (Linux + `windows` job: agent, masaüstü) → imzalı APK → **artifact** (14 gün) |
+| `.github/workflows/release.yml` | `v*` tag push | imzalı APK (onay = tag push; ortam onayı yok, bkz. not) → GitHub Release (+ sha256); `pc` job'u: agent + masaüstü exe zip'i aynı Release'e (ADR-0004) |
 | `.github/actions/build-apk` | ortak | JDK 17, Rust + `aarch64-linux-android`, SDK 34, NDK r27c, cargo-apk, imzalama |
 
 Çalışma akışı:

@@ -14,6 +14,9 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 - Agent tray → Ayarı yeniden yükle (yeniden başlatmadan); yanlış `bind` IP'si için açıklayıcı hata
 - Telefonda **PC** bölümü: LowMonitor'dan CPU (toplam + çekirdek çubukları), RAM, disk, ağ ve Top-5 süreç; agent `\\.\pipe\LowMonitor`'a yalnız telefon aboneyken bağlanır. Servis yoksa "LowMonitor servisi yok". Mock sahte metrik üretir.
 - Masaüstü (LowMonitor arayüzü) Canlı sekmesi: CPU, RAM, disk (R/W) ve ağ (↓/↑) kartlarında son 5 dk çizgisi; disk/ağ oto-ölçek (1-2-5), küçültme/kopma boşluğunda çizgi kopar
+- PC zip'i (`lowdeck-agent.exe` + `lowdeck-desktop.exe`) her `v*` Release'inde; kurulum `%LOCALAPPDATA%\LowDeck\`
+- Agent açılışta LowMonitor "Arayüzü aç" kaydını (`UiExe`) yazar: menü masaüstü hiç açılmadan aktif
+- Masaüstü, agent çalışmıyorsa yanındaki `lowdeck-agent.exe`'yi başlatır; ilk kurulumda `agent.cfg`'yi 5 s'ye kadar bekler
 ### Düzeltildi
 - Karşı taraf bağlantıyı temiz kapatınca `io: failed to fill whole buffer` yerine `bağlantı kapandı` raporlanır
 ### Değişti
