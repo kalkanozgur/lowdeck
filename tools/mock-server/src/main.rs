@@ -7,7 +7,7 @@
 use lowdeck_proto::*;
 use std::io::{BufReader, BufWriter};
 use std::io::ErrorKind;
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::time::Duration;
 
 const METRICS_EVERY: Duration = Duration::from_secs(2);
@@ -19,6 +19,7 @@ fn main() -> std::io::Result<()> {
 
     let listener = TcpListener::bind(("0.0.0.0", port))?;
     println!("mock-server: 0.0.0.0:{port} token={token:?}");
+    discovery(port);
 
     for conn in listener.incoming() {
         match conn {
@@ -138,6 +139,29 @@ fn handle(stream: TcpStream, token: &str) -> Result<(), FrameError> {
             C2S::Hello { .. } => write_frame(&mut wr, &S2C::Error(ErrorCode::Unsupported))?,
         }
     }
+}
+
+/// Keşif yanıtlayıcı (ADR-0007). Mock 0.0.0.0'a bağlı: yanıttaki host, sorgunun geldiği yoldaki yerel adres.
+fn discovery(port: u16) {
+    let sock = match UdpSocket::bind(("0.0.0.0", DISCOVERY_PORT)) {
+        Ok(s) => s,
+        Err(e) => return println!("keşif kapalı (UDP {DISCOVERY_PORT}): {e}"),
+    };
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 16];
+        while let Ok((n, src)) = sock.recv_from(&mut buf) {
+            if buf[..n] != DISCOVER_REQ {
+                continue;
+            }
+            // connect + local_addr: bu kaynağa giden arayüzün IP'si (paket gönderilmez)
+            let host = UdpSocket::bind(("0.0.0.0", 0))
+                .and_then(|u| u.connect(src).and_then(|_| u.local_addr()))
+                .map_or("127.0.0.1".into(), |a| a.ip().to_string());
+            let b = Beacon { proto: PROTO_VERSION, host, port, name: "mock".into() };
+            let _ = sock.send_to(&encode_beacon(&b), src);
+            println!("  keşif: {src}");
+        }
+    });
 }
 
 /// Rastgele değil, tick'e bağlı dalga: ekranda değişim görünsün, test tekrarlanabilir olsun.

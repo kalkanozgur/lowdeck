@@ -141,7 +141,7 @@ Workflow'lar ilk koşuda doğrulanacak; kırılırsa log okunup düzeltilir (ör
 - [x] Emoji ikonlar yerine gömülü SVG ikonlar (`@image-url("icons/…svg")`). Emoji fontu cihaza göre değişir.
 - [x] Bağlantı yokken butonları pasifleştir. Kopma/yeniden bağlanma durumlarını UI'da test et (mock'u kapatıp aç).
 - [x] Ayarlarda port/host doğrulaması.
-- [ ] (Opsiyonel) PC keşfi: agent'ın UDP beacon'ı (`PROTOCOL.md` §5). Manuel IP yeterliyse ertelenir.
+- [x] PC keşfi: "PC'yi bul" → UDP 47811 sorgu–yanıt, periyodik beacon yok ([ADR-0007](docs/kararlar/ADR-0007-pc-kesfi.md)).
 
 ### Faz 2 — Android
 - [ ] APK build. Telefon tamir edilene kadar başka bir Android cihazda ya da emülatörde test.

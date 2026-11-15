@@ -35,7 +35,7 @@ APK GitHub Actions'ta derlenir (bkz. `CLAUDE.md` Faz 0).
 1. Release sayfasından `lowdeck-pc-vX.Y.Z.zip`'i indir, içindeki iki exe'yi `%LOCALAPPDATA%\LowDeck\`'e aç (**ikisi aynı klasörde**).
 2. `lowdeck-agent.exe`'yi bir kez çalıştır → tray ikonu → **Windows ile başlat**. Agent `agent.cfg`'yi oluşturur ve `HKCU\Software\LowMonitor\UiExe`'yi yazar.
 3. PC arayüzü: LowMonitor tray → **Arayüzü aç**. Agent kapalıysa masaüstü onu kendisi başlatır.
-4. Telefon: agent tray menüsünün ilk satırındaki host / port / token.
-5. Telefon bağlanamıyorsa: agent tray → **Firewall kuralı ekle (yönetici)…** (UAC; yalnız Private profil + yerel alt ağ, bu exe ve port). Port değişirse tekrar çalıştır.
+4. Telefon: ⚙ → **PC'yi bul** (aynı Wi-Fi) → listeden seç; token agent tray menüsünün ilk satırında (host / port elle de girilebilir).
+5. Telefon PC'yi bulamıyor ya da bağlanamıyorsa: agent tray → **Firewall kuralı ekle (yönetici)…** (UAC; Private profil + yerel alt ağ, bu exe; TCP port + UDP 47811 keşif). Port değişirse tekrar çalıştır.
 
 Agent log'u: `%APPDATA%\LowDeck\agent.log` (1 MiB'ta `agent.log.1`'e döner); tray → **Log'u aç**.

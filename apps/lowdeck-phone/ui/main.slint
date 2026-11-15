@@ -72,6 +72,7 @@ component DeckButton inherits Rectangle {
 }
 
 export struct TopRow { name: string, cpu: string, ws: string }
+export struct FoundPc { label: string, host: string, port: string }
 
 // Metrik kutusu; canlı değilse "—" ve pasif renk.
 component Stat inherits VerticalLayout {
@@ -123,6 +124,10 @@ export component MainWindow inherits Window {
     in-out property <string> cfg-port;
     in-out property <string> cfg-token;
     in-out property <string> cfg-error;
+    // PC keşfi (ADR-0007): yalnız düğmeyle, ~1,5 s
+    in property <[FoundPc]> found;
+    in property <string> discover-status;
+    callback discover();
 
     // Boşta siyah perde: AMOLED pikselleri söner (burn-in + tüketim). Dokununca kalkar.
     in-out property <bool> blackout: false;
@@ -299,6 +304,18 @@ export component MainWindow inherits Window {
             spacing: 12px;
             alignment: start;
             Text { text: "Bağlantı"; color: Theme.text; font-size: 22px; }
+            HorizontalLayout {
+                spacing: 12px;
+                DeckButton { label: "PC'yi bul"; width: 140px; clicked => { root.discover(); } }
+                Text { text: root.discover-status; color: Theme.dim; font-size: 13px; vertical-alignment: center; wrap: word-wrap; }
+            }
+            for f in root.found: DeckButton {
+                label: f.label;
+                clicked => {
+                    root.cfg-host = f.host;
+                    root.cfg-port = f.port;
+                }
+            }
             Text { text: "PC adresi (IP ya da ad)"; color: Theme.dim; font-size: 13px; }
             LineEdit { text <=> root.cfg-host; placeholder-text: "192.168.1.x"; }
             Text { text: "Port"; color: Theme.dim; font-size: 13px; }

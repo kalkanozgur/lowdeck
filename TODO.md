@@ -16,11 +16,10 @@
 - [x] Masaüstü Geçmiş sekmesi + proto v4 `QueryHistory` (ADR-0005)
 - [x] Masaüstü Süreçler sekmesi + sonlandırma (ADR-0006)
 - [ ] Süreçler: Windows'ta tarama süresi/CPU, normal + yönetici süreci sonlandırma (UAC), PID reuse
-- [ ] Süreçler: öncelik / EcoQoS (sonra)
 - [ ] Geçmiş: Windows'ta gerçek LM ile 1 sa / 24 sa / 7 g yanıt süresi (hedef < 2 s)
 - [ ] Masaüstü Canlı grafikleri: Windows'ta boşta CPU / private bytes / exe boyutu ölçümü
 - [ ] `lowmon-proto` rev'i LowMonitor sürümleriyle birlikte güncelle (pipe `PROTO` artarsa agent `servis: BadHello` loglar)
 
 ## Fikirler
-- UDP beacon ile PC keşfi (PROTOCOL.md §5)
+- Rafta (kullanıcı, 2026-11-15): Süreçler'de öncelik / EcoQoS / affinity
 - Tuş kilidi (Faz 5, karar bekliyor)
