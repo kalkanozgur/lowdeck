@@ -2675,7 +2675,7 @@ dependencies = [
 [[package]]
 name = "lowmon-proto"
 version = "0.1.0"
-source = "git+https://github.com/kalkanozgur/lowmonitor?rev=2356e7f#2356e7f53090421d8ebe0a85c94b07c596555851"
+source = "git+https://github.com/kalkanozgur/lowmonitor?rev=3241c3a#3241c3aa347396cf918e70f677b30e9f37d48d62"
 dependencies = [
  "postcard",
  "serde",

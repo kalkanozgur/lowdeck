@@ -115,6 +115,15 @@ fn handle(stream: TcpStream, token: &str) -> Result<(), FrameError> {
                     write_frame(&mut wr, &S2C::Metrics(Some(fake_metrics(0))))?;
                     write_frame(&mut wr, &S2C::Top(fake_top(0)))?;
                 }
+                if t & TOPIC_EVENTS != 0 {
+                    write_frame(&mut wr, &S2C::Alarms(vec!["mock_cpu".into()]))?;
+                }
+            }
+            // Sabit örnek geçmiş + bitiş çerçevesi
+            C2S::QueryEvents { from_ms, .. } => {
+                let e = EventItem { ts_ms: from_ms, kind: 0, name: "mock_cpu".into(), value: 9_350 };
+                write_frame(&mut wr, &S2C::Events(vec![e]))?;
+                write_frame(&mut wr, &S2C::Events(vec![]))?;
             }
             C2S::Hello { .. } => write_frame(&mut wr, &S2C::Error(ErrorCode::Unsupported))?,
         }

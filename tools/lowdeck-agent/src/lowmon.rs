@@ -6,7 +6,8 @@
 //! Servis yoksa abonelik sürdükçe 10 s'de bir yeniden dener (LowMonitor tray gibi).
 
 use crate::Hub;
-use lowdeck_proto::{Metrics, TopItem, S2C};
+use lowdeck_proto::{EventItem, Metrics, TopItem, EVENT_NAME_MAX, S2C};
+use lowmon_proto::metrics::EventKind;
 use lowmon_proto::metrics::{Sample, TopEntry};
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,6 +34,16 @@ pub fn metrics_of(s: &Sample, ram_total_kb: u64) -> Metrics {
         net_rx_kbps: kbps(s.net.iter().map(|n| n.rx_bps).sum()),
         net_tx_kbps: kbps(s.net.iter().map(|n| n.tx_bps).sum()),
     }
+}
+
+/// LowMonitor olayı → kompakt öğe; ad kırpılır (çerçeve sınırı).
+pub fn event_of(ts_ms: u64, kind: EventKind, name: &str, value: i64) -> EventItem {
+    let kind = match kind {
+        EventKind::AlarmRaise => 0,
+        EventKind::AlarmClear => 1,
+        EventKind::System => 2,
+    };
+    EventItem { ts_ms, kind, name: name.chars().take(EVENT_NAME_MAX).collect(), value }
 }
 
 /// CPU'ya göre azalan ilk `TOP_N`.
@@ -75,6 +86,7 @@ fn run(hub: &Hub) {
                 println!("lowmon: {e}");
             }
             hub.push_metrics(S2C::Metrics(None));
+            hub.set_alarms(Vec::new()); // bilinmiyor; yeniden bağlanınca pipe `Alarms` gönderir
             hub.want.sleep_while_on(RETRY);
         }
     }
@@ -83,19 +95,49 @@ fn run(hub: &Hub) {
 /// Abonelik bitince bir sonraki çerçevede (≤ RATE_MS) döner; `File` düşünce pipe kapanır.
 #[cfg(windows)]
 fn session(mut f: std::fs::File, hub: &Hub) -> std::io::Result<()> {
-    use lowmon_proto::proto::{self, ClientMsg, Role, ServerMsg, CH_SAMPLE, CH_TOP, PROTO};
+    use lowmon_proto::proto::{self, ClientMsg, Role, ServerMsg, CH_EVENT, CH_SAMPLE, CH_TOP, PROTO};
     proto::write(&mut f, &ClientMsg::Hello { proto: PROTO, role: Role::Viewer })?;
-    proto::write(&mut f, &ClientMsg::Subscribe { channels: CH_SAMPLE | CH_TOP, rate_ms: RATE_MS })?;
+    proto::write(&mut f, &ClientMsg::Subscribe { channels: CH_SAMPLE | CH_TOP | CH_EVENT, rate_ms: RATE_MS })?;
     let total = ram_total_kb();
     while hub.want.get() {
         match proto::read::<ServerMsg>(&mut f)? {
             ServerMsg::Sample(s) => hub.push_metrics(S2C::Metrics(Some(metrics_of(&s, total)))),
             ServerMsg::Top(t) => hub.push_metrics(S2C::Top(top_of(&t))),
+            ServerMsg::Alarms(a) => hub.set_alarms(a),
+            ServerMsg::Event { ts_ms, kind, name, value } => hub.push_event(event_of(ts_ms, kind, &name, value)),
             ServerMsg::Error { code } => return Err(std::io::Error::other(format!("servis: {code:?}"))),
             _ => {} // Ack
         }
     }
     Ok(())
+}
+
+/// Pipe `QueryEvents` (LM `3241c3a`): ayrı kısa bağlantı, yalnız olaylar. Servis yok / hata → `Err`.
+// shortcut: üst sınır yok; aylık olay sayısı küçük (alarm geçişi + dakikada ≤ 1 sistem olayı), gerekirse sınır eklenir
+#[cfg(windows)]
+pub fn query_events(from_ms: u64, to_ms: u64) -> std::io::Result<Vec<EventItem>> {
+    use lowmon_proto::proto::{self, ClientMsg, RangeItem, Role, ServerMsg, PROTO};
+    let mut f = std::fs::OpenOptions::new().read(true).write(true).open(lowmon_proto::proto::PIPE_NAME)?;
+    proto::write(&mut f, &ClientMsg::Hello { proto: PROTO, role: Role::Viewer })?;
+    proto::write(&mut f, &ClientMsg::QueryEvents { from_ms, to_ms })?;
+    let (mut out, mut acks) = (Vec::new(), 0);
+    loop {
+        match proto::read::<ServerMsg>(&mut f)? {
+            ServerMsg::Range(items) => out.extend(items.into_iter().filter_map(|it| match it {
+                RangeItem::Event { ts_ms, kind, name, value } => Some(event_of(ts_ms, kind, &name, value)),
+                _ => None,
+            })),
+            // İlk Ack = Hello yanıtı, ikincisi sorgu sonu
+            ServerMsg::Ack => {
+                acks += 1;
+                if acks == 2 {
+                    return Ok(out);
+                }
+            }
+            ServerMsg::Error { code } => return Err(std::io::Error::other(format!("servis: {code:?}"))),
+            _ => {}
+        }
+    }
 }
 
 /// Sample'da toplam yok; fiziksel RAM oturumda değişmez, bağlantı başına bir kez.
@@ -142,5 +184,13 @@ mod tests {
         assert_eq!(t.len(), TOP_N);
         assert_eq!((t[0].name.len(), t[0].cpu, t[0].ws_mb), (NAME_MAX, 9, 2));
         assert_eq!(t.iter().map(|i| i.cpu).collect::<Vec<_>>(), [9, 5, 3, 2, 1]);
+    }
+
+    #[test]
+    fn event_kinds_and_name_limit() {
+        let e = event_of(7, EventKind::AlarmClear, &"y".repeat(100), -3);
+        assert_eq!((e.ts_ms, e.kind, e.name.len(), e.value), (7, 1, EVENT_NAME_MAX, -3));
+        assert_eq!(event_of(0, EventKind::AlarmRaise, "a", 0).kind, 0);
+        assert_eq!(event_of(0, EventKind::System, "a", 0).kind, 2);
     }
 }

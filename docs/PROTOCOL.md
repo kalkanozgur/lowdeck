@@ -1,4 +1,4 @@
-# LowDeck Protokolü v2
+# LowDeck Protokolü v3
 
 Kaynak: `crates/lowdeck-proto/src/lib.rs`. Bu doküman ile kod çelişirse **kod geçerlidir**, doküman güncellenir.
 
@@ -7,15 +7,15 @@ Kaynak: `crates/lowdeck-proto/src/lib.rs`. Bu doküman ile kod çelişirse **kod
 |---|---|
 | Transport | TCP, istemci (telefon) → sunucu (`lowdeck-agent`, PC kullanıcı oturumu; ADR-0002) |
 | Port | 47810 (varsayılan; 47800 LowMonitor `lowmon-net`'e ait) |
-| Bind | PC'nin LAN IP'si (config), `0.0.0.0` değil; firewall: yalnız Private profil + yerel alt ağ |
-| Bağlantı | Tek, kalıcı; `TCP_NODELAY` açık |
+| Bind | PC'nin LAN IP'si (config) + `127.0.0.1` aynı port (PC arayüzü, ADR-0003); `0.0.0.0` değil; firewall: yalnız Private profil + yerel alt ağ |
+| Bağlantı | Dinleyici başına tek, kalıcı (LAN yuvası + loopback yuvası, birbirini düşürmez); `TCP_NODELAY` açık; token ikisinde de zorunlu |
 | Çerçeve | `[u16 little-endian uzunluk][postcard payload]` |
 | Maks. payload | 4096 bayt |
 
 ## 2. El sıkışma
 ```
-C → S  Hello { proto: 2, token, name }
-S → C  Welcome { proto: 2, server }      | Error(BadVersion | BadToken) + kapat
+C → S  Hello { proto: 3, token, name }
+S → C  Welcome { proto: 3, server }      | Error(BadVersion | BadToken) + kapat
 S → C  Audio(AudioState)                 # tam durum
 S → C  Media(MediaState)                 # tam durum
 ...    sonrası: komutlar ve değişiklik push'ları
@@ -30,7 +30,7 @@ S → C  Media(MediaState)                 # tam durum
 | 1 | `Ping` | `u32` | 25 s'de bir; sunucu `Pong` ile aynı sayıyı döner |
 | 2 | `Audio` | `AudioCmd` | |
 | 3 | `Media` | `MediaCmd` | |
-| 4 | `Subscribe` | `Topics = u8` | bit 0 `TOPIC_METRICS`; `0` = hepsinden çık. Bağlantı başına; istemci her `Welcome`'dan sonra yeniden gönderir |
+| 4 | `Subscribe` | `Topics = u8` | bit 0 `TOPIC_METRICS`, bit 1 `TOPIC_EVENTS`; `0` = hepsinden çık. Bağlantı başına; istemci her `Welcome`'dan sonra yeniden gönderir |
 
 `AudioCmd`: `SetVolume(u8 0..=100)` · `Step(i8)` · `ToggleMute`
 `MediaCmd`: `PlayPause` · `Next` · `Prev` · `Stop`
@@ -62,7 +62,7 @@ S → C  Media(MediaState)                 # tam durum
 - Durum PC tarafında başka yoldan değişince de (klavye ses tuşu, başka uygulama) **olay tabanlı** push edilir: Core Audio callback, SMTC event. Polling yok.
 - 60 s boyunca istemciden hiçbir şey gelmezse bağlantı kapatılabilir.
 - Metrikler (ADR-0002 seçenek a): agent, istemci `TOPIC_METRICS`'e aboneyken `\\.\pipe\LowMonitor`'a `Viewer` olarak bağlanır (`Subscribe { CH_SAMPLE | CH_TOP, rate_ms: 2000 }`) ve her örneği `Metrics`, her Top-N'i `Top` olarak push eder. Önbellek yok: abone olunca ilk veri ≤ 2 s içinde gelir. Abonelik bitince (ya da istemci düşünce) pipe ≤ 2 s içinde kapanır; abone yokken agent'ta uyanma yok. Servis yoksa `Metrics(None)` gönderilir, abonelik sürdükçe 10 s'de bir yeniden denenir.
-- Telefon, siyah perde inince `Subscribe(0)`, dokununca `Subscribe(TOPIC_METRICS)` gönderir.
+- Olaylar (ADR-0003): metrik ya da olay abonesi varken pipe aboneliği `CH_SAMPLE | CH_TOP | CH_EVENT`. Agent aktif alarm listesini önbelleğe alır (pipe `Alarms` + Raise/Clear olayları); yeni `TOPIC_EVENTS` abonesine önce `Alarms`, sonra her olay `Event`. Pipe koparsa liste boşaltılır. `Subscribe(0)`, dokununca `Subscribe(TOPIC_METRICS)` gönderir.
 
 ## 5. İleride (taslak, uygulanmadı)
 - Keşif: sunucu UDP 47811'e 5 s'de bir `{"lowdeck":1,"port":47810,"name":…}` beacon yayınlar; istemci sadece ayar ekranı açıkken dinler.

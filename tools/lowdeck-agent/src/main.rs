@@ -86,27 +86,41 @@ struct Client {
     name: String,
     w: BufWriter<TcpStream>,
     metrics: bool,
+    events: bool,
 }
+
+/// Yuva = dinleyici (ADR-0003): LAN (telefon) ve loopback (PC arayüzü) birbirini düşürmez.
+pub const SLOT_LAN: usize = 0;
+pub const SLOT_LOCAL: usize = 1;
 
 #[derive(Default)]
 struct HubInner {
     audio: AudioState,
     media: MediaState,
     next_id: u64,
-    client: Option<Client>,
+    clients: [Option<Client>; 2],
+    /// LowMonitor aktif alarm listesi (pipe `Alarms` + olaylar); yeni olay abonesine ilk çerçeve.
+    alarms: Vec<String>,
 }
 
 impl HubInner {
-    /// false: yazma hatası, istemci düşürüldü.
-    fn send(&mut self, msg: &S2C) -> bool {
-        if let Some(c) = &mut self.client {
-            if write_frame(&mut c.w, msg).is_err() {
-                let _ = c.w.get_ref().shutdown(Shutdown::Both);
-                self.client = None;
-                return false;
+    /// `pick` uyan istemcilere yazar; false: en az biri yazma hatasıyla düşürüldü.
+    fn send_to(&mut self, msg: &S2C, pick: impl Fn(&Client) -> bool) -> bool {
+        let mut ok = true;
+        for slot in &mut self.clients {
+            if let Some(c) = slot.as_mut().filter(|c| pick(c)) {
+                if write_frame(&mut c.w, msg).is_err() {
+                    let _ = c.w.get_ref().shutdown(Shutdown::Both);
+                    *slot = None;
+                    ok = false;
+                }
             }
         }
-        true
+        ok
+    }
+
+    fn by_id(&mut self, id: u64) -> Option<&mut Client> {
+        self.clients.iter_mut().flatten().find(|c| c.id == id)
     }
 }
 
@@ -118,7 +132,7 @@ impl Hub {
 
     /// İstemci ya da aboneliği değişti: tray + lowmon'a bildir. Kilit dışında çağrılır.
     fn changed(&self) {
-        let want = self.lock().client.as_ref().is_some_and(|c| c.metrics);
+        let want = self.lock().clients.iter().flatten().any(|c| c.metrics || c.events);
         self.want.set(want);
         if let Some(f) = self.on_client.get() {
             f();
@@ -126,27 +140,58 @@ impl Hub {
     }
 
     fn subscribe(&self, id: u64, t: Topics) {
-        if let Some(c) = self.lock().client.as_mut().filter(|c| c.id == id) {
+        let mut g = self.lock();
+        let alarms = S2C::Alarms(g.alarms.clone());
+        if let Some(c) = g.by_id(id) {
+            let new_events = t & TOPIC_EVENTS != 0 && !c.events;
             c.metrics = t & TOPIC_METRICS != 0;
+            c.events = t & TOPIC_EVENTS != 0;
+            if new_events && write_frame(&mut c.w, &alarms).is_err() {
+                let _ = c.w.get_ref().shutdown(Shutdown::Both);
+            }
         }
+        drop(g);
         self.changed();
     }
 
-    /// Yalnız abone istemciye; önbelleğe alınmaz (eski örnek göstermek yanıltıcı).
+    /// Yalnız abone istemcilere; önbelleğe alınmaz (eski örnek göstermek yanıltıcı).
     pub fn push_metrics(&self, msg: S2C) {
+        if !self.lock().send_to(&msg, |c| c.metrics) {
+            self.changed();
+        }
+    }
+
+    /// Pipe `Alarms`: önbellek + olay abonelerine.
+    pub fn set_alarms(&self, alarms: Vec<String>) {
         let mut g = self.lock();
-        if g.client.as_ref().is_some_and(|c| c.metrics) && !g.send(&msg) {
+        g.alarms = alarms.clone();
+        if !g.send_to(&S2C::Alarms(alarms), |c| c.events) {
             drop(g);
             self.changed();
         }
     }
 
+    /// Pipe `Event`: aktif listeyi günceller + olay abonelerine.
+    pub fn push_event(&self, e: EventItem) {
+        let mut g = self.lock();
+        match e.kind {
+            0 if !g.alarms.contains(&e.name) => g.alarms.push(e.name.clone()),
+            1 => g.alarms.retain(|a| *a != e.name),
+            _ => {}
+        }
+        if !g.send_to(&S2C::Event(e), |c| c.events) {
+            drop(g);
+            self.changed();
+        }
+    }
+
+    /// Tray için: önce telefon (LAN), yoksa PC arayüzü.
     pub fn client_name(&self) -> Option<String> {
-        self.lock().client.as_ref().map(|c| c.name.clone())
+        self.lock().clients.iter().flatten().next().map(|c| c.name.clone())
     }
 
     fn push(&self, msg: S2C) {
-        let ok = self.lock().send(&msg);
+        let ok = self.lock().send_to(&msg, |_| true);
         if !ok {
             self.changed();
         }
@@ -177,8 +222,8 @@ impl Hub {
     }
 
     /// Welcome + tam durumu kilit altında yazar: arada push kaçmaz/araya girmez.
-    /// Önceki istemci kapatılır. Dönen id ile `reply`/`detach` yapılır.
-    fn attach(&self, name: String, mut w: BufWriter<TcpStream>) -> Option<u64> {
+    /// Aynı yuvadaki önceki istemci kapatılır. Dönen id ile `reply`/`detach` yapılır.
+    fn attach(&self, slot: usize, name: String, mut w: BufWriter<TcpStream>) -> Option<u64> {
         let mut g = self.lock();
         let hello = [
             S2C::Welcome { proto: PROTO_VERSION, server: server_name() },
@@ -188,40 +233,48 @@ impl Hub {
         for m in &hello {
             write_frame(&mut w, m).ok()?;
         }
-        if let Some(old) = g.client.take() {
+        if let Some(old) = g.clients[slot].take() {
             let _ = old.w.get_ref().shutdown(Shutdown::Both);
         }
         g.next_id += 1;
         let id = g.next_id;
-        g.client = Some(Client { id, name, w, metrics: false });
+        g.clients[slot] = Some(Client { id, name, w, metrics: false, events: false });
         drop(g);
         self.changed();
         Some(id)
     }
 
     fn reply(&self, id: u64, msg: &S2C) {
-        let mut g = self.lock();
-        if g.client.as_ref().is_some_and(|c| c.id == id) && !g.send(msg) {
-            drop(g);
+        if !self.lock().send_to(msg, |c| c.id == id) {
             self.changed();
         }
     }
 
-    /// Bağlı istemciyi düşürür (ayar yeniden yüklendi).
+    /// Bağlı istemcileri düşürür (ayar yeniden yüklendi).
     fn kick(&self) {
         let mut g = self.lock();
-        if let Some(c) = g.client.take() {
+        let mut any = false;
+        for c in g.clients.iter_mut().filter_map(Option::take) {
             let _ = c.w.get_ref().shutdown(Shutdown::Both);
-            drop(g);
+            any = true;
+        }
+        drop(g);
+        if any {
             self.changed();
         }
     }
 
     fn detach(&self, id: u64) {
         let mut g = self.lock();
-        if g.client.as_ref().is_some_and(|c| c.id == id) {
-            g.client = None;
-            drop(g);
+        let mut found = false;
+        for slot in &mut g.clients {
+            if slot.as_ref().is_some_and(|c| c.id == id) {
+                *slot = None;
+                found = true;
+            }
+        }
+        drop(g);
+        if found {
             self.changed();
         }
     }
@@ -235,11 +288,21 @@ fn server_name() -> String {
 pub trait Backend: Send + Sync {
     fn audio(&self, cmd: AudioCmd);
     fn media(&self, cmd: MediaCmd);
+    /// LowMonitor olay geçmişi (pipe `QueryEvents`); hata/servis yok → boş.
+    fn events(&self, _from_ms: u64, _to_ms: u64) -> Vec<EventItem> {
+        Vec::new()
+    }
 }
 
 // ---------------- Bağlantı ----------------
 
+/// Yuva yerel adresten: loopback dinleyici → PC arayüzü, diğeri → telefon (ADR-0003).
 fn handle(stream: TcpStream, token: &str, hub: &Hub, backend: &dyn Backend) -> Result<(), FrameError> {
+    let local = stream.local_addr().is_ok_and(|a| a.ip().is_loopback());
+    handle_in(stream, if local { SLOT_LOCAL } else { SLOT_LAN }, token, hub, backend)
+}
+
+fn handle_in(stream: TcpStream, slot: usize, token: &str, hub: &Hub, backend: &dyn Backend) -> Result<(), FrameError> {
     let peer = stream.peer_addr().ok();
     stream.set_nodelay(true).ok();
     stream.set_write_timeout(Some(WRITE_TIMEOUT)).ok();
@@ -265,7 +328,7 @@ fn handle(stream: TcpStream, token: &str, hub: &Hub, backend: &dyn Backend) -> R
             }
             println!("+ bağlandı: {name} {peer:?}");
             rd.get_ref().set_read_timeout(Some(READ_TIMEOUT)).ok();
-            let Some(id) = hub.attach(name, BufWriter::new(stream)) else { return Ok(()) };
+            let Some(id) = hub.attach(slot, name, BufWriter::new(stream)) else { return Ok(()) };
             session(&mut rd, &mut buf, id, hub, backend)
         }
         _ => Ok(()),
@@ -286,6 +349,13 @@ fn session(
             C2S::Audio(cmd) => backend.audio(cmd),
             C2S::Media(cmd) => backend.media(cmd),
             C2S::Subscribe(t) => hub.subscribe(id, t),
+            // Bu istemcinin okuma thread'inde bloklu; diğer istemciler etkilenmez.
+            C2S::QueryEvents { from_ms, to_ms } => {
+                for chunk in backend.events(from_ms, to_ms).chunks(EVENTS_PER_FRAME) {
+                    hub.reply(id, &S2C::Events(chunk.to_vec()));
+                }
+                hub.reply(id, &S2C::Events(Vec::new())); // bitti
+            }
             C2S::Hello { .. } => hub.reply(id, &S2C::Error(ErrorCode::Unsupported)),
         }
     })();
@@ -361,33 +431,53 @@ fn random_token() -> String {
 
 // ---------------- main ----------------
 
-/// Çalışan dinleyici. `stop` ile kapatılır (yeniden yükleme).
+/// Çalışan dinleyiciler (LAN + loopback). `stop` ile kapatılır (yeniden yükleme).
 struct Running {
     cfg: AgentConfig,
-    addr: std::net::SocketAddr,
+    /// İlki `bind` (LAN), varsa ikincisi loopback.
+    addrs: Vec<std::net::SocketAddr>,
     stop: Arc<std::sync::atomic::AtomicBool>,
-    thread: std::thread::JoinHandle<()>,
+    threads: Vec<std::thread::JoinHandle<()>>,
 }
 
 impl Running {
     fn stop(self) {
         self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
         // accept() bloklu: kendine bağlanarak uyandır, sonra thread (ve dinleyici) bitsin.
-        let _ = TcpStream::connect_timeout(&self.addr, Duration::from_secs(1));
-        let _ = self.thread.join();
+        for a in &self.addrs {
+            let _ = TcpStream::connect_timeout(a, Duration::from_secs(1));
+        }
+        for t in self.threads {
+            let _ = t.join();
+        }
     }
 }
 
-/// 0.0.0.0 değil: yalnız seçilen arayüz (ADR-0002).
+/// 0.0.0.0 değil: seçilen arayüz (ADR-0002) + PC arayüzü için 127.0.0.1 (ADR-0003, firewall gerekmez).
+/// Loopback açılamazsa telefon tarafı yine çalışır.
 fn listen(cfg: AgentConfig, hub: &Arc<Hub>, backend: &Arc<dyn Backend>) -> std::io::Result<Running> {
-    let listener = TcpListener::bind((cfg.bind.as_str(), cfg.port))?;
-    let addr = listener.local_addr()?;
+    let lan = TcpListener::bind((cfg.bind.as_str(), cfg.port))?;
+    let lan_addr = lan.local_addr()?;
+    let mut listeners = vec![lan];
+    if !lan_addr.ip().is_loopback() {
+        match TcpListener::bind(("127.0.0.1", lan_addr.port())) {
+            Ok(l) => listeners.push(l),
+            Err(e) => println!("loopback dinlenemedi: {e}"),
+        }
+    }
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let (token, hub, backend, s) = (Arc::<str>::from(cfg.token.as_str()), hub.clone(), backend.clone(), stop.clone());
-    let thread = std::thread::Builder::new()
-        .name("lowdeck-accept".into())
-        .spawn(move || accept_loop(listener, token, hub, backend, s))?;
-    Ok(Running { cfg, addr, stop, thread })
+    let token = Arc::<str>::from(cfg.token.as_str());
+    let (mut addrs, mut threads) = (Vec::new(), Vec::new());
+    for listener in listeners {
+        addrs.push(listener.local_addr()?);
+        let (token, hub, backend, s) = (token.clone(), hub.clone(), backend.clone(), stop.clone());
+        threads.push(
+            std::thread::Builder::new()
+                .name("lowdeck-accept".into())
+                .spawn(move || accept_loop(listener, token, hub, backend, s))?,
+        );
+    }
+    Ok(Running { cfg, addrs, stop, threads })
 }
 
 /// Kullanıcıya gösterilecek bind hatası; en sık hata: bind'a telefonun IP'sini yazmak.
@@ -573,6 +663,97 @@ mod tests {
         wait(false);
     }
 
+    /// Test sunucusu: her bağlantı verilen yuvaya, verilen arka uçla.
+    fn serve(hub: &Arc<Hub>, slot: usize, backend: Arc<dyn Backend>) -> std::net::SocketAddr {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let hub = hub.clone();
+        std::thread::spawn(move || {
+            for s in l.incoming() {
+                let (hub, backend) = (hub.clone(), backend.clone());
+                std::thread::spawn(move || handle_in(s.unwrap(), slot, "t", &hub, &*backend));
+            }
+        });
+        addr
+    }
+
+    /// Hello + Welcome/Audio/Media okunmuş istemci.
+    fn client(addr: std::net::SocketAddr) -> (BufWriter<TcpStream>, BufReader<TcpStream>) {
+        let s = TcpStream::connect(addr).unwrap();
+        let mut w = BufWriter::new(s.try_clone().unwrap());
+        write_frame(&mut w, &C2S::Hello { proto: PROTO_VERSION, token: "t".into(), name: "x".into() }).unwrap();
+        let mut rd = BufReader::new(s);
+        let mut buf = [0u8; MAX_FRAME];
+        for _ in 0..3 {
+            read_frame::<_, S2C>(&mut rd, &mut buf).unwrap();
+        }
+        (w, rd)
+    }
+
+    /// ADR-0003: telefon (LAN) ve PC arayüzü (loopback) birbirini düşürmez; yuva içinde yeni eskiyi kapatır.
+    #[test]
+    fn slots_are_independent() {
+        let hub = Arc::new(Hub::default());
+        let (lan, local) = (serve(&hub, SLOT_LAN, Arc::new(Null)), serve(&hub, SLOT_LOCAL, Arc::new(Null)));
+        let (_wa, mut a) = client(lan);
+        let (_wb, mut b) = client(local);
+        hub.set_audio_level(10, false);
+        let mut buf = [0u8; MAX_FRAME];
+        for rd in [&mut a, &mut b] {
+            assert!(matches!(read_frame::<_, S2C>(rd, &mut buf).unwrap(), S2C::Audio(_)));
+        }
+        let (_wc, _c) = client(local); // loopback yuvasında yeni istemci
+        assert!(matches!(read_frame::<_, S2C>(&mut b, &mut buf), Err(FrameError::Closed | FrameError::Io(_))));
+        hub.set_audio_level(20, false);
+        assert!(matches!(read_frame::<_, S2C>(&mut a, &mut buf).unwrap(), S2C::Audio(_)), "LAN istemcisi düşmemeli");
+    }
+
+    /// Olay aboneliği: önce önbellekteki aktif liste, sonra olaylar; liste olaylarla güncellenir.
+    #[test]
+    fn events_subscription() {
+        let hub = Arc::new(Hub::default());
+        hub.set_alarms(vec!["cpu_high".into()]);
+        let (mut w, mut rd) = client(serve(&hub, SLOT_LOCAL, Arc::new(Null)));
+        let mut buf = [0u8; MAX_FRAME];
+        write_frame(&mut w, &C2S::Subscribe(TOPIC_EVENTS)).unwrap();
+        assert_eq!(read_frame::<_, S2C>(&mut rd, &mut buf).unwrap(), S2C::Alarms(vec!["cpu_high".into()]));
+        // Alarms çerçevesi kilit altında, want ondan hemen sonra → kısa bekle
+        assert!((0..100).any(|_| hub.want.get() || { std::thread::sleep(Duration::from_millis(10)); false }), "olay aboneliği pipe'ı açtırmalı");
+        hub.push_metrics(S2C::Metrics(None)); // metrik abonesi değil → gitmez
+        let e = EventItem { ts_ms: 5, kind: 0, name: "ram".into(), value: 9_000 };
+        hub.push_event(e.clone());
+        assert_eq!(read_frame::<_, S2C>(&mut rd, &mut buf).unwrap(), S2C::Event(e));
+        hub.push_event(EventItem { kind: 1, name: "cpu_high".into(), ..Default::default() });
+        assert_eq!(hub.lock().alarms, ["ram"]);
+    }
+
+    struct History(usize);
+    impl Backend for History {
+        fn audio(&self, _: AudioCmd) {}
+        fn media(&self, _: MediaCmd) {}
+        fn events(&self, from_ms: u64, _: u64) -> Vec<EventItem> {
+            (0..self.0).map(|i| EventItem { ts_ms: from_ms + i as u64, ..Default::default() }).collect()
+        }
+    }
+
+    /// QueryEvents: EVENTS_PER_FRAME'lik parçalar + boş bitiş çerçevesi.
+    #[test]
+    fn query_events_chunks_and_terminates() {
+        let hub = Arc::new(Hub::default());
+        let (mut w, mut rd) = client(serve(&hub, SLOT_LOCAL, Arc::new(History(EVENTS_PER_FRAME * 2 + 3))));
+        let mut buf = [0u8; MAX_FRAME];
+        write_frame(&mut w, &C2S::QueryEvents { from_ms: 100, to_ms: 200 }).unwrap();
+        let mut sizes = Vec::new();
+        loop {
+            match read_frame::<_, S2C>(&mut rd, &mut buf).unwrap() {
+                S2C::Events(v) if v.is_empty() => break,
+                S2C::Events(v) => sizes.push(v.len()),
+                m => panic!("beklenmeyen {m:?}"),
+            }
+        }
+        assert_eq!(sizes, [EVENTS_PER_FRAME, EVENTS_PER_FRAME, 3]);
+    }
+
     /// Hello zaman aşımı oturuma taşmamalı (Windows'ta try_clone'lu handle timeout'u paylaşmıyor).
     #[test]
     fn idle_session_survives_hello_timeout() {
@@ -602,7 +783,7 @@ mod tests {
         let backend: Arc<dyn Backend> = Arc::new(Null);
         let cfg = AgentConfig { bind: "127.0.0.1".into(), port: 0, token: "t".into() };
         let r = listen(cfg, &hub, &backend).unwrap();
-        let port = r.addr.port();
+        let port = r.addrs[0].port();
         r.stop();
         let again = AgentConfig { bind: "127.0.0.1".into(), port, token: "t".into() };
         listen(again, &hub, &backend).expect("aynı port yeniden açılmalı").stop();
