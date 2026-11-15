@@ -2655,6 +2655,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lowdeck-desktop"
+version = "0.1.0"
+dependencies = [
+ "lowdeck-client",
+ "lowdeck-proto",
+ "slint",
+ "slint-build",
+ "windows",
+]
+
+[[package]]
 name = "lowdeck-phone"
 version = "0.1.0"
 dependencies = [

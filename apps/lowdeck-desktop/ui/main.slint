@@ -1,0 +1,200 @@
+// LowMonitor PC arayüzü (ADR-0003): Canlı + Olaylar. Veri lowdeck-agent loopback'ten.
+// Animasyon/timer yok; yalnız property değişince yeniden çizim.
+
+import { ListView } from "std-widgets.slint";
+
+global Theme {
+    out property <color> bg: #101010;
+    out property <color> surface: #1c1c1c;
+    out property <color> text: #e6e6e6;
+    out property <color> dim: #8a8a8a;
+    out property <color> accent: #4fc3f7;
+    out property <color> warn: #ff7043;
+    out property <color> ok: #66bb6a;
+    out property <color> disabled: #3a3a3a;
+}
+
+export struct TopRow { name: string, cpu: string, ws: string }
+export struct EventRow { time: string, kind: int, name: string, value: string }
+
+component Tab inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+    height: 32px;
+    width: 96px;
+    border-radius: 6px;
+    background: root.active ? Theme.surface : transparent;
+    TouchArea { clicked => { root.clicked(); } }
+    Text {
+        text: root.label;
+        color: root.active ? Theme.accent : Theme.dim;
+        font-size: 14px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component Stat inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> live;
+    background: Theme.surface;
+    border-radius: 8px;
+    min-height: 64px;
+    horizontal-stretch: 1;
+    VerticalLayout {
+        padding: 10px;
+        spacing: 2px;
+        Text { text: root.label; color: Theme.dim; font-size: 12px; }
+        Text {
+            text: root.live ? root.value : "—";
+            color: root.live ? Theme.text : Theme.disabled;
+            font-size: 22px;
+            overflow: elide;
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    // Tek örnek: ikinci kopya bu başlıkla pencereyi bulup öne getirir.
+    title: "LowMonitor";
+    background: Theme.bg;
+    preferred-width: 760px;
+    preferred-height: 520px;
+    min-width: 520px;
+    min-height: 360px;
+
+    in property <string> status: "Bağlanıyor…";
+    in property <bool> connected: false;
+    in property <int> lm-state: 0; // 0 = veri yok, 1 = canlı, 2 = LowMonitor servisi yok
+    in property <string> lm-cpu;
+    in property <string> lm-ram;
+    in property <string> lm-disk;
+    in property <string> lm-net;
+    in property <[float]> lm-cores; // 0..1
+    in property <[TopRow]> lm-top;
+    in property <string> alarms; // "" = aktif alarm yok
+    in property <[EventRow]> events; // yeni → eski
+    in-out property <int> tab: 0; // 0 = Canlı, 1 = Olaylar
+    property <bool> live: root.connected && root.lm-state == 1;
+
+    callback refresh-events();
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            Tab { label: "Canlı"; active: root.tab == 0; clicked => { root.tab = 0; } }
+            Tab { label: "Olaylar"; active: root.tab == 1; clicked => { root.tab = 1; } }
+            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                width: 10px;
+                height: 10px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 5px;
+                background: root.connected ? Theme.ok : Theme.warn;
+            }
+            Text {
+                text: !root.connected ? root.status : root.lm-state == 2 ? "LowMonitor servisi yok" : root.status;
+                color: root.connected && root.lm-state != 2 ? Theme.dim : Theme.warn;
+                font-size: 13px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        if root.alarms != "": Rectangle {
+            background: #3a1d14;
+            border-radius: 6px;
+            height: 32px;
+            Text {
+                x: 12px;
+                text: "⚠ Aktif alarm: " + root.alarms;
+                color: Theme.warn;
+                font-size: 14px;
+                vertical-alignment: center;
+                height: parent.height;
+                overflow: elide;
+            }
+        }
+
+        // --- Canlı ---
+        if root.tab == 0: VerticalLayout {
+            spacing: 12px;
+            HorizontalLayout {
+                spacing: 12px;
+                Stat { label: "CPU"; value: root.lm-cpu; live: root.live; }
+                Stat { label: "RAM"; value: root.lm-ram; live: root.live; }
+                Stat { label: "DİSK  B/s"; value: root.lm-disk; live: root.live; }
+                Stat { label: "AĞ  B/s"; value: root.lm-net; live: root.live; }
+            }
+            // Mutlak konum: `for` içeren layout boşken max-width = 0 verir (telefon UI'ı notu).
+            bars := Rectangle {
+                height: 48px;
+                property <length> slot: self.width / max(1, root.lm-cores.length);
+                for c[i] in root.lm-cores: Rectangle {
+                    x: i * bars.slot;
+                    width: bars.slot - 3px;
+                    background: Theme.surface;
+                    Rectangle {
+                        height: parent.height * clamp(c, 0, 1);
+                        y: parent.height - self.height;
+                        background: root.live ? Theme.accent : Theme.disabled;
+                    }
+                }
+            }
+            Text { text: "EN ÇOK CPU"; color: Theme.dim; font-size: 12px; }
+            Rectangle {
+                height: 5 * 22px;
+                VerticalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    alignment: start;
+                    spacing: 2px;
+                    for t in root.lm-top: HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: t.name; color: root.live ? Theme.text : Theme.disabled; font-size: 15px; overflow: elide; horizontal-stretch: 1; }
+                        Text { text: t.cpu; color: root.live ? Theme.text : Theme.disabled; font-size: 15px; width: 72px; horizontal-alignment: right; }
+                        Text { text: t.ws; color: Theme.dim; font-size: 15px; width: 96px; horizontal-alignment: right; }
+                    }
+                }
+            }
+            Rectangle { vertical-stretch: 1; }
+        }
+
+        // --- Olaylar (son 24 saat + canlı) ---
+        if root.tab == 1: VerticalLayout {
+            spacing: 8px;
+            HorizontalLayout {
+                Text { text: "SON 24 SAAT"; color: Theme.dim; font-size: 12px; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                Tab { label: "Yenile"; active: false; clicked => { root.refresh-events(); } }
+            }
+            if root.events.length == 0: Text {
+                text: root.connected ? "Olay yok" : "—";
+                color: Theme.dim;
+                font-size: 14px;
+            }
+            ListView {
+                vertical-stretch: 1;
+                for e in root.events: HorizontalLayout {
+                    spacing: 12px;
+                    padding-top: 3px;
+                    padding-bottom: 3px;
+                    Text { text: e.time; color: Theme.dim; font-size: 14px; width: 150px; }
+                    Text {
+                        text: e.kind == 0 ? "ALARM" : e.kind == 1 ? "temizlendi" : "sistem";
+                        color: e.kind == 0 ? Theme.warn : e.kind == 1 ? Theme.ok : Theme.dim;
+                        font-size: 14px;
+                        width: 88px;
+                    }
+                    Text { text: e.name; color: Theme.text; font-size: 14px; horizontal-stretch: 1; overflow: elide; }
+                    Text { text: e.value; color: Theme.dim; font-size: 14px; width: 96px; horizontal-alignment: right; }
+                }
+            }
+        }
+    }
+}

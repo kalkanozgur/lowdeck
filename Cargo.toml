@@ -4,6 +4,7 @@ members = [
     "crates/lowdeck-proto",
     "crates/lowdeck-client",
     "apps/lowdeck-phone",
+    "apps/lowdeck-desktop",
     "tools/mock-server",
     "tools/lowdeck-agent",
 ]
