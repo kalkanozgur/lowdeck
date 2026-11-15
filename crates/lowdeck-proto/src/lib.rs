@@ -169,6 +169,40 @@ pub enum ErrorCode {
     Internal,
 }
 
+// ---------------- Keşif (UDP, ADR-0007) ----------------
+
+/// İstemci bu porta yayın (broadcast) sorgusu atar; sunucu tek UDP datagram ile yanıtlar.
+/// TCP protokolünden bağımsız: `PROTO_VERSION` yanıtın içinde bilgi olarak gelir.
+pub const DISCOVERY_PORT: u16 = 47811;
+/// Sorgu: sabit 4 bayt (sürümlü sihirli sayı); başka içerik yanıtlanmaz.
+pub const DISCOVER_REQ: [u8; 4] = *b"LDQ1";
+const DISCOVER_RESP: [u8; 4] = *b"LDA1";
+/// Yanıttaki metin alanları kırpılır: datagram küçük kalır (yansıtma kazancı ≤ ~25×, yalnız LAN).
+pub const BEACON_TEXT_MAX: usize = 63;
+
+/// Keşif yanıtı. **Token içermez**: bulunan PC'ye bağlanmak için token yine elle girilir.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct Beacon {
+    pub proto: u16,
+    /// İstemcinin bağlanacağı adres (agent'ın `bind` IP'si).
+    pub host: String,
+    pub port: u16,
+    /// PC adı (gösterim).
+    pub name: String,
+}
+
+pub fn encode_beacon(b: &Beacon) -> Vec<u8> {
+    let cut = |s: &str| s.chars().take(BEACON_TEXT_MAX).collect::<String>();
+    let b = Beacon { host: cut(&b.host), name: cut(&b.name), ..b.clone() };
+    let mut v = DISCOVER_RESP.to_vec();
+    v.extend(postcard::to_allocvec(&b).unwrap_or_default());
+    v
+}
+
+pub fn decode_beacon(datagram: &[u8]) -> Option<Beacon> {
+    postcard::from_bytes(datagram.strip_prefix(&DISCOVER_RESP)?).ok()
+}
+
 // ---------------- Çerçeveleme ----------------
 
 #[derive(Debug)]
@@ -317,6 +351,17 @@ mod tests {
         let mut wire = Vec::new();
         write_frame(&mut wire, &msg).unwrap();
         assert!(wire.len() <= MAX_FRAME, "history {} bayt", wire.len());
+    }
+
+    #[test]
+    fn beacon_roundtrip_and_limits() {
+        let b = Beacon { proto: PROTO_VERSION, host: "192.168.1.20".into(), port: DEFAULT_PORT, name: "x".repeat(500) };
+        let wire = encode_beacon(&b);
+        assert!(wire.len() <= 4 + 2 + 1 + 15 + 3 + 1 + BEACON_TEXT_MAX, "beacon {} bayt", wire.len());
+        let d = decode_beacon(&wire).unwrap();
+        assert_eq!((d.host.as_str(), d.port, d.name.len()), ("192.168.1.20", DEFAULT_PORT, BEACON_TEXT_MAX));
+        assert_eq!(decode_beacon(&DISCOVER_REQ), None);
+        assert_eq!(decode_beacon(b"LDA1"), None);
     }
 
     #[test]

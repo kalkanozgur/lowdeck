@@ -5,10 +5,11 @@
 slint::include_modules!();
 
 mod config;
+mod discover;
 
 use config::AppConfig;
 use lowdeck_client::{Client, Config, Event};
-use lowdeck_proto::{AudioCmd, MediaCmd, Metrics, TopItem, S2C, TOPIC_METRICS};
+use lowdeck_proto::{AudioCmd, MediaCmd, Metrics, TopItem, PROTO_VERSION, S2C, TOPIC_METRICS};
 use slint::{Model, ModelRc, VecModel};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -260,6 +261,42 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                     false
                 }
             }
+        });
+    }
+
+    // PC keşfi: ayrı thread'de ~1,5 s; sonuç listesine dokununca host/port dolar (token elle).
+    {
+        let weak = ui.as_weak();
+        ui.on_discover(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_discover_status("Aranıyor…".into());
+            set_vec(ui.get_found(), Vec::new(), |v| ui.set_found(v));
+            let weak = weak.clone();
+            std::thread::spawn(move || {
+                let found = discover::discover(discover::WAIT);
+                let _ = weak.upgrade_in_event_loop(move |ui| {
+                    let rows: Vec<FoundPc> = found
+                        .iter()
+                        .map(|b| FoundPc {
+                            label: format!(
+                                "{}  ·  {}:{}{}",
+                                b.name,
+                                b.host,
+                                b.port,
+                                if b.proto != PROTO_VERSION { "  (sürüm farklı)" } else { "" }
+                            )
+                            .into(),
+                            host: b.host.as_str().into(),
+                            port: b.port.to_string().into(),
+                        })
+                        .collect();
+                    ui.set_discover_status(match rows.len() {
+                        0 => "Bulunamadı: aynı Wi-Fi'da mı, agent açık mı, firewall kuralı var mı?".into(),
+                        n => format!("{n} PC bulundu, seç; token agent tray menüsünde").into(),
+                    });
+                    set_vec(ui.get_found(), rows, |v| ui.set_found(v));
+                });
+            });
         });
     }
 

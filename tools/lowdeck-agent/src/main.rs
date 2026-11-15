@@ -17,7 +17,7 @@
 
 use lowdeck_proto::*;
 use std::io::{BufReader, BufWriter};
-use std::net::{Shutdown, TcpListener, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -449,6 +449,8 @@ struct Running {
     cfg: AgentConfig,
     /// İlki `bind` (LAN), varsa ikincisi loopback.
     addrs: Vec<std::net::SocketAddr>,
+    /// Keşif soketi açıksa: `stop`'ta uyandırmak için kendine datagram.
+    udp_wake: Option<SocketAddr>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     threads: Vec<std::thread::JoinHandle<()>>,
 }
@@ -459,6 +461,9 @@ impl Running {
         // accept() bloklu: kendine bağlanarak uyandır, sonra thread (ve dinleyici) bitsin.
         for a in &self.addrs {
             let _ = TcpStream::connect_timeout(a, Duration::from_secs(1));
+        }
+        if let Some(a) = self.udp_wake {
+            let _ = UdpSocket::bind(("127.0.0.1", 0)).and_then(|u| u.send_to(&[0], a));
         }
         for t in self.threads {
             let _ = t.join();
@@ -490,8 +495,48 @@ fn listen(cfg: AgentConfig, hub: &Arc<Hub>, backend: &Arc<dyn Backend>) -> std::
                 .spawn(move || accept_loop(listener, token, hub, backend, s))?,
         );
     }
-    log!("dinleniyor: {addrs:?}");
-    Ok(Running { cfg, addrs, stop, threads })
+    // Keşif (ADR-0007): yalnız LAN bind'inde (loopback'te telefon yok). Sorgu gelmezse uyanma yok.
+    let mut udp_wake = None;
+    if !lan_addr.ip().is_loopback() {
+        match UdpSocket::bind(("0.0.0.0", DISCOVERY_PORT)) {
+            Ok(u) => {
+                let beacon = Beacon { proto: PROTO_VERSION, host: cfg.bind.clone(), port: lan_addr.port(), name: server_name() };
+                let s = stop.clone();
+                threads.push(
+                    std::thread::Builder::new()
+                        .name("lowdeck-discovery".into())
+                        .stack_size(64 * 1024)
+                        .spawn(move || discovery_loop(&u, &beacon, &s))?,
+                );
+                udp_wake = Some(SocketAddr::from(([127, 0, 0, 1], DISCOVERY_PORT)));
+            }
+            Err(e) => log!("keşif dinlenemedi (UDP {DISCOVERY_PORT}): {e}"),
+        }
+    }
+    log!("dinleniyor: {addrs:?}, keşif: {}", if udp_wake.is_some() { "açık" } else { "kapalı" });
+    Ok(Running { cfg, addrs, udp_wake, stop, threads })
+}
+
+/// Keşif yanıtlayıcı: yalnız `DISCOVER_REQ`'e, kaynağa tek datagram. Yanıt arası ≥ 100 ms (yansıtma sınırı).
+fn discovery_loop(sock: &UdpSocket, beacon: &Beacon, stop: &std::sync::atomic::AtomicBool) {
+    let reply = encode_beacon(beacon);
+    let mut buf = [0u8; 16];
+    let mut last: Option<std::time::Instant> = None;
+    loop {
+        // Windows'ta önceki yanıtın ICMP "port ulaşılamaz"ı recv_from hatası olarak dönebilir: yok sayılır.
+        let r = sock.recv_from(&mut buf);
+        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        let Ok((n, src)) = r else { continue };
+        if buf[..n] != DISCOVER_REQ || last.is_some_and(|t| t.elapsed() < Duration::from_millis(100)) {
+            continue;
+        }
+        last = Some(std::time::Instant::now());
+        if sock.send_to(&reply, src).is_ok() {
+            log!("keşif: {src} sordu");
+        }
+    }
 }
 
 /// Gelen bağlantı kuralı (Faz 4): yalnız Private profil + yerel alt ağ, bu exe ve port.
@@ -499,10 +544,14 @@ fn listen(cfg: AgentConfig, hub: &Arc<Hub>, backend: &Arc<dyn Backend>) -> std::
 pub fn firewall_args(port: u16, exe: &str) -> String {
     const RULE: &str = "netsh advfirewall firewall";
     const NAME: &str = "name=\"LowDeck agent\"";
-    format!(
-        "/c {RULE} delete rule {NAME} >nul 2>&1 & {RULE} add rule {NAME} dir=in action=allow protocol=TCP \
-         localport={port} profile=private remoteip=localsubnet program=\"{exe}\""
-    )
+    let add = |proto: &str, port: u16| {
+        format!(
+            "{RULE} add rule {NAME} dir=in action=allow protocol={proto} localport={port} profile=private \
+             remoteip=localsubnet program=\"{exe}\""
+        )
+    };
+    // TCP: bağlantı; UDP: keşif (ADR-0007). Aynı ad → tek `delete` ikisini de siler.
+    format!("/c {RULE} delete rule {NAME} >nul 2>&1 & {} & {}", add("TCP", port), add("UDP", DISCOVERY_PORT))
 }
 
 /// Kullanıcıya gösterilecek bind hatası; en sık hata: bind'a telefonun IP'sini yazmak.
@@ -756,11 +805,35 @@ mod tests {
     }
 
     #[test]
+    fn discovery_replies_only_to_query() {
+        let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let addr = sock.local_addr().unwrap();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let b = Beacon { proto: PROTO_VERSION, host: "192.168.1.20".into(), port: 47810, name: "pc".into() };
+        let t = {
+            let (stop, b) = (stop.clone(), b.clone());
+            std::thread::spawn(move || discovery_loop(&sock, &b, &stop))
+        };
+        let c = UdpSocket::bind("127.0.0.1:0").unwrap();
+        c.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+        let mut buf = [0u8; 256];
+        c.send_to(b"nope", addr).unwrap(); // yanıtlanmaz
+        c.send_to(&DISCOVER_REQ, addr).unwrap();
+        let (n, _) = c.recv_from(&mut buf).unwrap();
+        assert_eq!(decode_beacon(&buf[..n]), Some(b));
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        c.send_to(&[0], addr).unwrap();
+        t.join().unwrap();
+    }
+
+    #[test]
     fn firewall_rule() {
         let a = firewall_args(47810, r"C:\Users\a b\AppData\Local\LowDeck\lowdeck-agent.exe");
         assert!(a.starts_with("/c netsh advfirewall firewall delete rule name=\"LowDeck agent\""));
         assert!(a.contains(" & netsh advfirewall firewall add rule name=\"LowDeck agent\" dir=in action=allow protocol=TCP "));
         assert!(a.contains("localport=47810 profile=private remoteip=localsubnet"));
+        assert!(a.contains(" & netsh advfirewall firewall add rule name=\"LowDeck agent\" dir=in action=allow protocol=UDP localport=47811 "));
+        assert_eq!(a.matches("program=").count(), 2);
         assert!(a.ends_with(r#"program="C:\Users\a b\AppData\Local\LowDeck\lowdeck-agent.exe""#));
     }
 

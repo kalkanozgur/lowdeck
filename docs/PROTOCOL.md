@@ -76,8 +76,16 @@ S → C  Media(MediaState)                 # tam durum
 
 - Geçmiş (v4, ADR-0005): `QueryHistory` → agent ayrı kısa pipe bağlantısıyla `QueryRange` ister (aralık > 6 sa → `Resolution::Minute`, değilse `Raw`), öğeleri akış halinde kovalar (`Sample` ortalama + max, `Agg{Avg}` ortalama, `Agg{Max}` CPU max; `Gap`/`Min`/`Event` yok sayılır). Sorgu istemcinin okuma thread'inde bloklu çalışır; diğer yuva etkilenmez.
 
-## 5. İleride (taslak, uygulanmadı)
-- Keşif: sunucu UDP 47811'e 5 s'de bir `{"lowdeck":1,"port":47810,"name":…}` beacon yayınlar; istemci sadece ayar ekranı açıkken dinler.
+## 5. Keşif (UDP, ADR-0007)
+| Alan | Değer |
+|---|---|
+| Port | UDP 47811 (`DISCOVERY_PORT`), agent `0.0.0.0`'a bağlı |
+| Sorgu | istemci → `255.255.255.255:47811`: 4 bayt `LDQ1` (`DISCOVER_REQ`); 600 ms sonra bir kez tekrar, 1,5 s yanıt toplanır |
+| Yanıt | sunucu → kaynağa tek datagram: `LDA1` + postcard `Beacon { proto: u16, host: String, port: u16, name: String }` (metinler ≤ 63 karakter) |
+| Güvenlik | Token **yok**; yalnız `LDQ1` yanıtlanır, yanıt arası ≥ 100 ms, firewall Private + yerel alt ağ |
+Periyodik beacon yayını yok: sorgu gelmezse ağda trafik yok. Bind loopback ise agent keşfi açmaz.
+
+## 6. İleride (taslak, uygulanmadı)
 - `C2S::Lock(LockCmd)`, `S2C::Lock(LockState)`: tuş kilidi.
 - Eşleştirme: LowMonitor spek §16.2 şeması (6 hane, 120 s → 256-bit token; PC'de SHA-256 hash, DPAPI; hatalı denemede 1 s gecikme, IP başına 10 hata → 10 dk ban). Gelince `PROTO_VERSION` artar.
 
