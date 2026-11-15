@@ -21,9 +21,11 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 - Agent log dosyası `%APPDATA%\LowDeck\agent.log` (1 MiB döndürme), tray → Log'u aç
 - Agent tray → Firewall kuralı ekle (UAC; Private profil + yerel alt ağ)
 ### Düzeltildi
+- Masaüstü Geçmiş: 2×2 kart genişliği pencereye bağlıydı → Slint binding loop uyarısı (ileride panic riski); genişlik artık yalnız stretch ile bölünüyor
 - Masaüstü grafikleri kart yüksekliğini dolduruyor (Slint `Path` varsayılan `fit: contain` en-boy oranını koruyordu)
 - Karşı taraf bağlantıyı temiz kapatınca `io: failed to fill whole buffer` yerine `bağlantı kapandı` raporlanır
 ### Değişti
+- Masaüstü exe: Slint yalnız femtovg renderer (software renderer, erişilebilirlik, system-tray kapalı); Windows release 8,60 → 7,85 MiB
 - **Protokol v4** (`QueryHistory`, `History`): telefon APK'sı, agent ve masaüstü birlikte güncellenmeli; eski sürüm `BadVersion` alır.
 - **Protokol v2** (`Subscribe`, `Metrics`, `Top`): telefon ve agent birlikte güncellenmeli; eski sürüm `BadVersion` ile reddedilir.
 - Varsayılan port 47800 → **47810** (LowMonitor `lowmon-net` ile çakışma). Kayıtlı ayardaki port elle güncellenmeli.
