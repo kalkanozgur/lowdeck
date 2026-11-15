@@ -11,6 +11,9 @@
 
 - [x] F6: LowMonitor metrikleri telefonda (agent pipe Viewer, ADR-0002 a)
 - [ ] F6: cihazda ölçüm (abone iken telefon CPU/uyanma, perde inince pipe kapanıyor mu)
+- [x] PC dağıtımı: Release'e Windows zip, agent `UiExe` yazar, masaüstü agent'ı başlatır (ADR-0004)
+- [ ] ADR-0004 Windows doğrulaması: zip kurulumu, agent kapalıyken "Arayüzü aç", `agent.cfg` yokken ilk açılış
+- [ ] Masaüstü Canlı grafikleri: Windows'ta boşta CPU / private bytes / exe boyutu ölçümü
 - [ ] `lowmon-proto` rev'i LowMonitor sürümleriyle birlikte güncelle (pipe `PROTO` artarsa agent `servis: BadHello` loglar)
 
 ## Fikirler

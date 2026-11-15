@@ -28,8 +28,8 @@ jobs:
       - run: cargo test --workspace
       - run: cargo clippy --workspace -- -D warnings
 
-  # Agent'ın Windows kodu (Core Audio/SMTC) Linux'ta derlenmez; burada doğrulanır.
-  agent:
+  # Agent (Core Audio/SMTC) ve masaüstünün `win.rs`'i Linux'ta derlenmez; burada doğrulanır.
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,8 +37,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p lowdeck-agent
-      - run: cargo clippy -p lowdeck-agent --all-targets -- -D warnings
+      - run: cargo test -p lowdeck-agent -p lowdeck-desktop
+      - run: cargo clippy -p lowdeck-agent -p lowdeck-desktop --all-targets -- -D warnings
 
   apk:
     needs: check

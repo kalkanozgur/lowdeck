@@ -30,3 +30,9 @@ cargo run -p lowdeck-desktop                          # agent.cfg'den; mock içi
 cargo run --release -p lowdeck-agent
 ```
 APK GitHub Actions'ta derlenir (bkz. `CLAUDE.md` Faz 0).
+
+## PC kurulumu (ADR-0004)
+1. Release sayfasından `lowdeck-pc-vX.Y.Z.zip`'i indir, içindeki iki exe'yi `%LOCALAPPDATA%\LowDeck\`'e aç (**ikisi aynı klasörde**).
+2. `lowdeck-agent.exe`'yi bir kez çalıştır → tray ikonu → **Windows ile başlat**. Agent `agent.cfg`'yi oluşturur ve `HKCU\Software\LowMonitor\UiExe`'yi yazar.
+3. PC arayüzü: LowMonitor tray → **Arayüzü aç**. Agent kapalıysa masaüstü onu kendisi başlatır.
+4. Telefon: agent tray menüsünün ilk satırındaki host / port / token.

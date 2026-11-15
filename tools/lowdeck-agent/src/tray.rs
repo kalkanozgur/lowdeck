@@ -69,6 +69,25 @@ pub fn single_instance() -> bool {
     }
 }
 
+/// Yanında `lowdeck-desktop.exe` varsa `HKCU\Software\LowMonitor` `UiExe` = onun yolu (ADR-0004 madde 2):
+/// LowMonitor tray "Arayüzü aç" masaüstü hiç açılmadan da aktif olur.
+pub fn register_ui_exe() {
+    let Some(ui) = std::env::current_exe().ok().map(|p| p.with_file_name("lowdeck-desktop.exe")) else { return };
+    let Some(ui) = ui.is_file().then(|| ui.to_str().map(wide)).flatten() else { return };
+    // shortcut: kayıt hatası sessiz; yalnız tray kısayolu etkilenir
+    // SAFETY: NUL sonlu dizgeler; veri boyutu NUL dahil byte.
+    unsafe {
+        let _ = RegSetKeyValueW(
+            HKEY_CURRENT_USER,
+            w!(r"Software\LowMonitor"),
+            w!("UiExe"),
+            REG_SZ.0,
+            Some(ui.as_ptr().cast()),
+            (ui.len() * 2) as u32,
+        );
+    }
+}
+
 pub fn error_box(text: &str) {
     let t = wide(text);
     // SAFETY: NUL sonlu dizgeler.

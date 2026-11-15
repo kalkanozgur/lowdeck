@@ -5,9 +5,11 @@
 
 slint::include_modules!();
 
+mod history;
 #[cfg(windows)]
 mod win;
 
+use history::{nice_scale, History, Sample};
 use lowdeck_client::{Client, Config, Event};
 use lowdeck_proto::{EventItem, Metrics, TopItem, C2S, DEFAULT_PORT, S2C, TOPIC_EVENTS, TOPIC_METRICS};
 use slint::{Model, ModelRc, VecModel};
@@ -28,12 +30,38 @@ fn main() -> Result<(), slint::PlatformError> {
     let ui = MainWindow::new()?;
     let events = Rc::new(VecModel::<EventRow>::default());
     ui.set_events(ModelRc::from(events.clone()));
-
-    let Some((port, token)) = target() else {
-        ui.set_status("agent.cfg yok: LowDeck agent'ı bir kez çalıştırın".into());
-        return ui.run();
-    };
     let offset = local_offset_s();
+
+    match target() {
+        Some((port, token)) => start_client(&ui, events, port, token, offset),
+        // İlk kurulum: cfg'yi agent oluşturur (ADR-0004 madde 4).
+        None if start_agent() => {
+            AGENT_TRIED.with(|t| t.set(true));
+            ui.set_status("Agent başlatılıyor…".into());
+            retry_cfg(ui.as_weak(), events, offset, 1);
+        }
+        None => ui.set_status("agent.cfg yok: LowDeck agent'ı bir kez çalıştırın".into()),
+    }
+    ui.run()
+}
+
+/// `agent.cfg` yeniden okuma denemesi sayısı (1 s aralık); sonra durur, periyodik iş kalmaz.
+const CFG_RETRIES: u32 = 5;
+
+/// Tek-atışlık timer zinciri: cfg gelince istemci başlar, `CFG_RETRIES` sonra vazgeçer.
+fn retry_cfg(weak: slint::Weak<MainWindow>, events: Rc<VecModel<EventRow>>, offset: i64, n: u32) {
+    slint::Timer::single_shot(std::time::Duration::from_secs(1), move || {
+        let Some(ui) = weak.upgrade() else { return };
+        match target() {
+            Some((port, token)) => start_client(&ui, events, port, token, offset),
+            None if n < CFG_RETRIES => retry_cfg(weak, events, offset, n + 1),
+            None => ui.set_status("agent.cfg oluşmadı: %APPDATA%\\LowDeck\\agent.cfg".into()),
+        }
+    });
+}
+
+/// İstemciyi başlatır; `Rc<Client>` kancaların (küçültme, Yenile, bağlanınca geçmiş) closure'larında yaşar.
+fn start_client(ui: &MainWindow, events: Rc<VecModel<EventRow>>, port: u16, token: String, offset: i64) {
     let weak = ui.as_weak();
     let client = Rc::new(Client::start(
         Config { host: "127.0.0.1".into(), port, token, name: "LowMonitor arayüzü".into() },
@@ -57,22 +85,30 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    let query = {
-        let (client, events) = (client.clone(), events.clone());
-        move || {
-            events.set_vec(Vec::new());
-            let now = now_ms();
-            client.send(&C2S::QueryEvents { from_ms: now.saturating_sub(HISTORY_MS), to_ms: u64::MAX });
-        }
+    let query = move || {
+        events.set_vec(Vec::new());
+        let now = now_ms();
+        client.send(&C2S::QueryEvents { from_ms: now.saturating_sub(HISTORY_MS), to_ms: u64::MAX });
     };
     ui.on_refresh_events(query.clone());
     // Her bağlanışta geçmiş yeniden istenir: `apply` Connected'ı görünce bu kancayı çağırır.
     QUERY.with(|q| *q.borrow_mut() = Some(Box::new(query)));
-    ui.run()
+}
+
+/// Agent'ı başlatmayı oturum başına bir kez dene (ADR-0004 madde 3); Windows dışında yok.
+fn start_agent() -> bool {
+    #[cfg(windows)]
+    return win::start_agent();
+    #[cfg(not(windows))]
+    false
 }
 
 thread_local! {
+    /// Oturumda agent başlatma denendi mi (ilk kopmada bir kez).
+    static AGENT_TRIED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static QUERY: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
+    /// Canlı grafik geçmişi + path buffer'ı (yalnız event loop thread'i).
+    static HIST: std::cell::RefCell<(History, String)> = std::cell::RefCell::new((History::default(), String::new()));
 }
 
 /// (port, token): argümanlar, yoksa `%APPDATA%\LowDeck\agent.cfg`.
@@ -111,12 +147,15 @@ fn apply(ui: &MainWindow, ev: Event, offset: i64) {
         }
         Event::Disconnected { reason } => {
             ui.set_connected(false);
-            ui.set_status(format!("Agent yok: {reason}").into());
+            let starting = !AGENT_TRIED.with(|t| t.replace(true)) && start_agent();
+            ui.set_status(if starting { "Agent başlatılıyor…".into() } else { format!("Agent yok: {reason}").into() });
             ui.set_lm_state(0);
             ui.set_alarms("".into());
+            clear_graphs(ui);
         }
         Event::Msg(S2C::Metrics(None)) => {
             ui.set_lm_state(2);
+            clear_graphs(ui);
             set_vec(ui.get_lm_cores(), Vec::new(), |v| ui.set_lm_cores(v));
             set_vec(ui.get_lm_top(), Vec::new(), |v| ui.set_lm_top(v));
         }
@@ -179,6 +218,52 @@ fn show_metrics(ui: &MainWindow, m: &Metrics) {
     ui.set_lm_net(format!("↓ {}  ↑ {}", rate(m.net_rx_kbps), rate(m.net_tx_kbps)).into());
     let cores = m.cores.iter().map(|&c| c as f32 / 200.0).collect();
     set_vec(ui.get_lm_cores(), cores, |v| ui.set_lm_cores(v));
+    graphs(ui, m, now_ms() / 1000);
+}
+
+/// Örneği geçmişe ekler, 6 çizgi + 2 ölçek etiketini günceller (Metrics başına bir kez, ≈ 1 Hz).
+fn graphs(ui: &MainWindow, m: &Metrics, now_s: u64) {
+    HIST.with(|h| {
+        let (h, buf) = &mut *h.borrow_mut();
+        h.push(Sample {
+            ts_s: now_s,
+            cpu: m.cpu,
+            ram: m.ram_used_mb as f32 / m.ram_total_mb.max(1) as f32,
+            dr: m.disk_r_kbps,
+            dw: m.disk_w_kbps,
+            rx: m.net_rx_kbps,
+            tx: m.net_tx_kbps,
+        });
+        let mut line = |f: &dyn Fn(&Sample) -> f32, set: &dyn Fn(slint::SharedString)| {
+            h.path(now_s, f, buf);
+            set(buf.as_str().into());
+        };
+        line(&|s| s.cpu as f32 / 10_000.0, &|v| ui.set_lm_cpu_path(v));
+        line(&|s| s.ram, &|v| ui.set_lm_ram_path(v));
+        // Disk/ağ: iki çizgi ortak ölçekte (penceredeki max, 1-2-5 yuvarlama).
+        let disk = nice_scale(h.max(now_s, |s| s.dr.max(s.dw))) as f32;
+        line(&|s| s.dr as f32 / disk, &|v| ui.set_lm_disk_r_path(v));
+        line(&|s| s.dw as f32 / disk, &|v| ui.set_lm_disk_w_path(v));
+        let net = nice_scale(h.max(now_s, |s| s.rx.max(s.tx))) as f32;
+        line(&|s| s.rx as f32 / net, &|v| ui.set_lm_net_rx_path(v));
+        line(&|s| s.tx as f32 / net, &|v| ui.set_lm_net_tx_path(v));
+        ui.set_lm_disk_scale(rate(disk as u32).into());
+        ui.set_lm_net_scale(rate(net as u32).into());
+    });
+}
+
+fn clear_graphs(ui: &MainWindow) {
+    HIST.with(|h| h.borrow_mut().0.clear());
+    for set in [
+        MainWindow::set_lm_cpu_path,
+        MainWindow::set_lm_ram_path,
+        MainWindow::set_lm_disk_r_path,
+        MainWindow::set_lm_disk_w_path,
+        MainWindow::set_lm_net_rx_path,
+        MainWindow::set_lm_net_tx_path,
+    ] {
+        set(ui, "".into());
+    }
 }
 
 fn top_row(t: &TopItem) -> TopRow {

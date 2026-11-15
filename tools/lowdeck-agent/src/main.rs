@@ -498,6 +498,7 @@ fn main() {
     if !tray::single_instance() {
         return;
     }
+    tray::register_ui_exe();
     let path = config_path();
     let hub = Arc::new(Hub::default());
     let backend: Arc<dyn Backend> = Arc::new(win::start(hub.clone()));

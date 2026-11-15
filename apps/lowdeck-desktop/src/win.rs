@@ -1,11 +1,12 @@
 //! Windows: tek örnek, `UiExe` kaydı (LM tray "Arayüzü aç"), yerel saat farkı.
 
-use windows::core::w;
+use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
 use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::System::Time::{GetTimeZoneInformation, TIME_ZONE_INFORMATION};
-use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE};
+use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOWNORMAL};
 
 /// İkinci kopya mevcut pencereyi öne getirip çıkar (tray "Arayüzü aç" tekrar tıklanınca).
 pub fn single_instance() -> bool {
@@ -39,6 +40,17 @@ pub fn register_ui_exe() {
             (data.len() * 2) as u32,
         );
     }
+}
+
+/// Yanındaki `lowdeck-agent.exe`'yi başlatır (ADR-0004 madde 3). Agent tek örnek: zaten çalışıyorsa yeni kopya çıkar.
+/// false = exe yok ya da başlatılamadı.
+pub fn start_agent() -> bool {
+    let Some(exe) = std::env::current_exe().ok().map(|p| p.with_file_name("lowdeck-agent.exe")) else { return false };
+    let Some(exe) = exe.is_file().then(|| exe.to_str().map(String::from)).flatten() else { return false };
+    let file: Vec<u16> = exe.encode_utf16().chain([0]).collect();
+    // SAFETY: NUL sonlu dizgeler; dönüş yalnız sayı olarak okunur (> 32 = başarı, ShellExecute sözleşmesi).
+    let r = unsafe { ShellExecuteW(None, w!("open"), PCWSTR(file.as_ptr()), None, None, SW_SHOWNORMAL) };
+    r.0 as isize > 32
 }
 
 /// `GetTimeZoneInformation` dönüşü (winnt.h); windows crate'inde sabit yok.
