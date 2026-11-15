@@ -10,7 +10,7 @@ license.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "lowdeck-desktop"
+name = "lowdeck-phone-dev"
 path = "src/main.rs"
 
 [dependencies]

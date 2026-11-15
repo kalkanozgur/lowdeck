@@ -39,6 +39,7 @@ lowdeck/
 │  └─ lowdeck-client/         # UI'dan bağımsız istemci: bağlan/yeniden bağlan/ping/olay
 │     └─ examples/cli.rs      # UI'sız uçtan uca test istemcisi
 ├─ apps/lowdeck-phone/        # Slint uygulaması
+├─ apps/lowdeck-desktop/      # LowMonitor PC arayüzü (ADR-0003)
 │  ├─ ui/main.slint           # tek ekran + ayar paneli
 │  └─ src/{lib.rs,main.rs,config.rs}   # lib = Android cdylib, main = masaüstü
 ├─ tools/mock-server/         # sahte sunucu (agent gelene kadar)
@@ -61,7 +62,7 @@ cargo clippy --workspace -- -D warnings
 
 # Masaüstünde geliştirme döngüsü (iki terminal)
 cargo run -p mock-server -- 47810 dev
-cargo run -p lowdeck-phone --bin lowdeck-desktop
+cargo run -p lowdeck-phone --bin lowdeck-phone-dev
 #   ilk açılışta ⚙ → host=127.0.0.1, port=47810, token=dev
 
 # Gerçek PC sunucusu (Windows, tray'de çalışır; ayar: %APPDATA%\LowDeck\agent.cfg, yoksa LAN IP + rastgele token ile oluşturur)

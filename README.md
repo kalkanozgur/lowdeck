@@ -12,6 +12,7 @@ Eski Xiaomi Mi Note 10 Lite'ı aynı LAN'daki Windows PC için minimum tüketiml
 crates/lowdeck-proto     protokol tipleri + çerçeveleme
 crates/lowdeck-client    UI'dan bağımsız istemci
 apps/lowdeck-phone       Slint uygulaması (Android + masaüstü)
+apps/lowdeck-desktop     LowMonitor PC arayüzü (Canlı + Olaylar, agent loopback)
 tools/mock-server        sahte PC sunucusu
 tools/lowdeck-agent      gerçek PC sunucusu (Windows: Core Audio + SMTC)
 docs/                    PROTOCOL, gereksinimler, devlog, kararlar
@@ -21,7 +22,8 @@ docs/                    PROTOCOL, gereksinimler, devlog, kararlar
 ## Hızlı başlangıç
 ```powershell
 cargo run -p mock-server -- 47810 dev
-cargo run -p lowdeck-phone --bin lowdeck-desktop   # ⚙ → 127.0.0.1 / 47810 / dev
+cargo run -p lowdeck-phone --bin lowdeck-phone-dev   # ⚙ → 127.0.0.1 / 47810 / dev
+cargo run -p lowdeck-desktop                          # agent.cfg'den; mock için: -- 47810 dev
 
 # Gerçek PC sunucusu (mock yerine), tray'de çalışır: sağ tık → telefon ayarı / Windows ile başlat
 # ayar %APPDATA%\LowDeck\agent.cfg (ilk açılışta LAN IP + rastgele token ile oluşur)
