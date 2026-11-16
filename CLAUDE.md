@@ -12,17 +12,14 @@ Eski **Xiaomi Mi Note 10 Lite** (toco, SD730G, AMOLED) telefonu aynı LAN'daki W
 | Medya kontrolü (play/pause, ileri, geri) + çalan parça bilgisi | **Faz 1 — şimdi** |
 | Tuş kilidi (kedi-kilit tetikleme ya da ajan içinde hook) | **Sonra**, karar verilmedi |
 | LowMonitor kaynak verisini telefonda gösterme | Sonra |
-| LowMonitor PC arayüzü (masaüstü; Canlı, Olaylar, Geçmiş, Süreçler), agent köprüsü | Var ([ADR-0003](docs/kararlar/ADR-0003-agent-lowmonitor-koprusu.md), [ADR-0005](docs/kararlar/ADR-0005-gecmis-sorgusu.md), [ADR-0006](docs/kararlar/ADR-0006-surecler-ve-sonlandirma.md), LM ADR-0029) |
+| LowMonitor PC arayüzü + PC sunucusu | LowMonitor reposunda (LM ADR-0031; eski ADR-0002…0008) |
 
-> **⚠ Taşınma (LM ADR-0031, 2026-11-16):** PC tarafı LowMonitor reposuna geçiyor. `tools/lowdeck-agent` → LM `crates/lowmon-deck` (tray içinde, tek süreç/ikon), `apps/lowdeck-desktop` → LM `lowmon-ui`, ayar `%APPDATA%\LowMonitor\deck.toml` (`agent.cfg`'den token/port/bind göçü → telefon ayarı değişmez).
-> **Bu repoda kalanlar:** `lowdeck-proto` (tek doğruluk kaynağı; LM bunu git `rev` ile kullanır), `lowdeck-client`, `apps/lowdeck-phone`, `tools/mock-server`, `cli`, Android CI/release.
-> **Kurallar (geçiş süresince):**
-> - Agent/masaüstü koduna yeni özellik **eklenmez**; PC tarafı işleri LM reposunda yapılır. Yalnız kritik hata düzeltmesi.
-> - Proto değişikliği (yeni C2S/S2C varyantı, `PROTO_VERSION`) burada yapılır, sonra LM'de `lowdeck-proto` rev'i güncellenir. Varyant yalnız sona eklenir.
-> - LM Faz 1–4 bitip kullanıcı "tamam" deyince **LowDeck Faz 5 (temizlik):** `tools/lowdeck-agent` + `apps/lowdeck-desktop` silinir, workspace üyeleri, `ci.yml` `windows` job'u ve `release.yml` `pc` job'u sadeleşir, README/CLAUDE.md/PROTOCOL.md "sunucu = LowMonitor tray" olarak güncellenir. APK değişmemeli.
-> - Telefon tarafı testleri: `mock-server` ya da LM tray (deck). Ayrıntı: TODO.md "ADR-0031 taşınma".
+> **PC tarafı LowMonitor'da (LM ADR-0031, Faz 5 tamam 2026-11-16):** sunucu = LowMonitor tray içindeki `lowmon-deck`, PC arayüzü = `lowmon-ui`, ayar `%APPDATA%\LowMonitor\deck.toml`. Bu repoda: `lowdeck-proto` (tek doğruluk kaynağı; LM git `rev` ile kullanır), `lowdeck-client` (+ `cli`), `apps/lowdeck-phone`, `tools/mock-server`, Android CI/release.
+> - Proto değişikliği burada yapılır, sonra LM'de `lowdeck-proto` rev'i güncellenir. Varyant yalnız sona eklenir.
+> - PC tarafı işleri (ses, medya, keşif yanıtı, kilit, arayüz) LM reposunda.
+> - Telefon testleri: `mock-server` ya da LM tray.
 
-**Öncelik: telefon tarafı.** PC tarafı ayrı, küçük bir exe: `tools/lowdeck-agent` (Rust, kullanıcı oturumu, ADR-0002). O hazır olana kadar `tools/mock-server` kullanılır.
+**Öncelik: telefon tarafı.**
 
 ## 2. Mimari kararlar (değiştirmeden önce kullanıcıya sor)
 | Karar | Seçim | Neden |
@@ -33,7 +30,7 @@ Eski **Xiaomi Mi Note 10 Lite** (toco, SD730G, AMOLED) telefonu aynı LAN'daki W
 | Kodlama | `[u16 LE uzunluk][postcard]` | Komut çerçevesi 3–4 bayt, JSON parser yok |
 | Async | **Yok** (tokio vb. yok), 2 std thread | Binary boyutu ve uyanma sayısı düşük |
 | Kimlik doğrulama | Hello içinde paylaşılan token; sonra LowMonitor §16.2 tarzı eşleştirme | Sadece LAN; TLS gereksiz yük. Bind LAN IP + Private firewall |
-| Sunucu | Ayrı `lowdeck-agent`, kullanıcı oturumu, TCP 47810 ([ADR-0002](docs/kararlar/ADR-0002-lowdeck-agent.md)) | Core Audio/SMTC session 0'da çalışmaz; LowMonitor servisi ağa kapalı, `lowmon-net` salt-okuma + WS/JSON + M6 |
+| Sunucu | LowMonitor tray içinde `lowmon-deck`, kullanıcı oturumu, TCP 47810 (LM ADR-0031; önceden `lowdeck-agent`, [ADR-0002](docs/kararlar/ADR-0002-lowdeck-agent.md)) | Core Audio/SMTC session 0'da çalışmaz; tek süreç/ikon |
 
 Lisans: proje MIT OR Apache-2.0 (2026-11-16, önceden GPL-3.0-only; LowMonitor ile aynı, LM ADR-0031). Slint, Royalty-free 2.0 lisansıyla kullanılır: masaüstü/mobil uygun, gömülü değil; şart = README'deki "Made with Slint" rozeti (binary'lerin indirildiği sayfa). Rozet kaldırılmaz.
 
@@ -43,15 +40,13 @@ lowdeck/
 ├─ CLAUDE.md
 ├─ Cargo.toml                 # workspace + release profili (opt "s", LTO, strip, panic=abort)
 ├─ crates/
-│  ├─ lowdeck-proto/          # mesaj tipleri + çerçeveleme (telefon + agent + mock)
+│  ├─ lowdeck-proto/          # mesaj tipleri + çerçeveleme (telefon + LM deck + mock)
 │  └─ lowdeck-client/         # UI'dan bağımsız istemci: bağlan/yeniden bağlan/ping/olay
 │     └─ examples/cli.rs      # UI'sız uçtan uca test istemcisi
 ├─ apps/lowdeck-phone/        # Slint uygulaması
-├─ apps/lowdeck-desktop/      # LowMonitor PC arayüzü (ADR-0003)
 │  ├─ ui/main.slint           # tek ekran + ayar paneli
 │  └─ src/{lib.rs,main.rs,config.rs}   # lib = Android cdylib, main = masaüstü
-├─ tools/mock-server/         # sahte sunucu (agent gelene kadar)
-├─ tools/lowdeck-agent/       # gerçek PC sunucusu: Core Audio + SMTC (src/win.rs)
+├─ tools/mock-server/         # sahte sunucu (gerçeği LowMonitor tray)
 ├─ .github/                   # CI (test+APK) ve tag tetikli release workflow'ları
 ├─ README.md · CHANGELOG.md · TODO.md
 └─ docs/
@@ -73,8 +68,7 @@ cargo run -p mock-server -- 47810 dev
 cargo run -p lowdeck-phone --bin lowdeck-phone-dev
 #   ilk açılışta ⚙ → host=127.0.0.1, port=47810, token=dev
 
-# Gerçek PC sunucusu (Windows, tray'de çalışır; ayar: %APPDATA%\LowDeck\agent.cfg, yoksa LAN IP + rastgele token ile oluşturur)
-cargo run --release -p lowdeck-agent
+# Gerçek PC sunucusu: LowMonitor tray (ayar %APPDATA%\LowMonitor\deck.toml; tray → Telefon ▸)
 
 # UI'sız test
 cargo run -p lowdeck-client --example cli -- 127.0.0.1 47810 dev
@@ -122,8 +116,8 @@ APK'lar GitHub Actions'ta derlenir. Lokalde sadece Rust + masaüstü build gerek
 
 | Workflow | Tetik | Ne yapar |
 |---|---|---|
-| `.github/workflows/ci.yml` | PR, main push | test + clippy (Linux + `windows` job: agent, masaüstü) → imzalı APK → **artifact** (14 gün) |
-| `.github/workflows/release.yml` | `v*` tag push | imzalı APK (onay = tag push; ortam onayı yok, bkz. not) → GitHub Release (+ sha256); `pc` job'u: agent + masaüstü exe zip'i aynı Release'e (ADR-0004) |
+| `.github/workflows/ci.yml` | PR, main push | test + clippy (Linux) → imzalı APK → **artifact** (14 gün) |
+| `.github/workflows/release.yml` | `v*` tag push | imzalı APK (onay = tag push; ortam onayı yok, bkz. not) → GitHub Release (+ sha256). PC exe'leri LowMonitor'da (LM ADR-0031) |
 | `.github/actions/build-apk` | ortak | JDK 17, Rust + `aarch64-linux-android`, SDK 34, NDK r27c, cargo-apk, imzalama |
 
 Çalışma akışı:
@@ -168,7 +162,7 @@ Hedefler (ölçülecek, tahmin değil):
 | Komut gecikmesi (dokunma → PC) | < 50 ms LAN | mock-server zaman damgası |
 Renderer seçimi (femtovg/skia/software) ölçümle karşılaştırılır.
 
-### Faz 4 — `tools/lowdeck-agent` (bu repo; ADR-0002)
+### Faz 4 — PC sunucusu (eski `tools/lowdeck-agent`; ADR-0002) → LowMonitor `lowmon-deck`'e taşındı (LM ADR-0031); açık maddeler LM'de
 - Kullanıcı oturumunda, `HKCU\…\Run` ile başlar (LowMonitor tray gibi). Servis değil.
 - [x] İskelet + Hub (önbellek, yalnız değişince push, yeni bağlantı eskisini kapatır) + Core Audio + SMTC + VK_MEDIA fallback. Release 238 KB, private 2,5 MB, boşta 0 CPU.
 - [x] Tray ikonu (yeşil = telefon bağlı, gri = bekliyor; tooltip host:port + telefon adı), menü: telefon ayar satırı, ayar dosyasını aç, **Windows ile başlat** (`HKCU\…\Run`), Çıkış. Konsolsuz (`windows_subsystem`), tek örnek, başlangıç hatası MessageBox.

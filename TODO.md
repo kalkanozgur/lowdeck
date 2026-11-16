@@ -5,11 +5,11 @@
 - [ ] Faz 0: keystore + `ANDROID_KEYSTORE_*` secret'ları (kullanıcı)
 
 ## ADR-0031 taşınma (PC tarafı → LowMonitor)
-- [ ] LM Faz 1: `lowmon-deck` crate (agent kodu) — LM reposu
-- [ ] LM Faz 2: tray deck'i başlatır, `deck.toml` + `agent.cfg` göçü — LM
-- [ ] LM Faz 3: `lowmon-ui` (masaüstü taşınır) — LM
-- [ ] LM Faz 4: kurulum/release/firewall `lowmon-tray.exe`, eski `lowdeck-agent` Run kaydı temizliği — LM
-- [ ] LowDeck Faz 5: `tools/lowdeck-agent` + `apps/lowdeck-desktop` sil; `Cargo.toml` üyeleri, `ci.yml` windows job, `release.yml` pc job, README/CLAUDE.md/PROTOCOL.md (sunucu = LM tray); ADR-0002…0008 "yerine geçti" — LM Faz 4 bittikten sonra
+- [x] LM Faz 1: `lowmon-deck` crate (agent kodu) — LM reposu
+- [x] LM Faz 2: tray deck'i başlatır, `deck.toml` + `agent.cfg` göçü — LM
+- [x] LM Faz 3: `lowmon-ui` (masaüstü taşınır) — LM
+- [x] LM Faz 4: kurulum/release/firewall `lowmon-tray.exe`, eski `lowdeck-agent` Run kaydı temizliği — LM
+- [x] LowDeck Faz 5: `tools/lowdeck-agent` + `apps/lowdeck-desktop` sil; `Cargo.toml` üyeleri, `ci.yml` windows job, `release.yml` pc job, README/CLAUDE.md/PROTOCOL.md (sunucu = LM tray); ADR-0002…0008 "yerine geçti" — LM Faz 4 bittikten sonra
 - Not: aşağıdaki agent/masaüstü maddeleri (ADR-0004 doğrulaması, `kill_elevated`, `lowmon-proto` rev) LM'ye geçer; burada kapatılmaz, LM TODO'suna taşınır.
 
 ## Sonra

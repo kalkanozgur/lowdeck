@@ -31,6 +31,6 @@ Eski Android telefonu, aynı LAN'daki Windows PC için düşük tüketimli ses/m
 - İç mekân, masa üstü. Sürekli şarjda pil sıcaklığı: TBD
 
 ## Kabul kriterleri
-- F1–F4 mock sunucuya ve lowdeck-agent'a karşı çalışır.
+- F1–F4 mock sunucuya ve LowMonitor tray'e (`lowmon-deck`) karşı çalışır.
 - Tüketim tablosundaki ölçümler `adb` ile alınıp devlog'a yazılmıştır.
 - Ses donanımı gerektirmez (telefonun ses codec'i arızalı).

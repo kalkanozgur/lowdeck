@@ -1,6 +1,6 @@
 # ADR-0004: PC dağıtımı ve başlatma zinciri
 - Tarih: 2026-11-15
-- Durum: Kabul (ADR-0003 madde 6'yı genişletir). **Taşınıyor:** LM ADR-0031 (2026-11-16) ile kod LowMonitor'a geçer; karar orada sürer
+- Durum: Kabul (ADR-0003 madde 6'yı genişletir). **Taşındı:** LM ADR-0031 (2026-11-16); kod LowMonitor `lowmon-deck` (tray) + `lowmon-ui`, bu repodan silindi (LowDeck Faz 5). Karar orada sürer
 
 ## Bağlam
 LowMonitor tray "Arayüzü aç", `HKCU\Software\LowMonitor\UiExe` değerindeki exe'yi `ShellExecuteW` ile açar (LM ADR-0029). Bugünkü durum:

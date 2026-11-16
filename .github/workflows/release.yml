@@ -1,6 +1,5 @@
 # v* tag'i push edilince imzalı APK derlenip GitHub Release'e eklenir. Telefon APK'yı
-# doğrudan Release sayfasından indirip kurar. PC exe'leri (agent + masaüstü) zip olarak
-# aynı Release'e eklenir (ADR-0004).
+# doğrudan Release sayfasından indirip kurar. PC tarafı LowMonitor'da (LM ADR-0031).
 # Onay = tag push'un kendisi: private + GitHub Free'de environment reviewer yok.
 name: release
 
@@ -43,34 +42,3 @@ jobs:
           cp "${{ steps.build.outputs.apk }}" "$OUT"
           sha256sum "$OUT" > "$OUT.sha256"
           gh release create "$GITHUB_REF_NAME" "$OUT" "$OUT.sha256" --generate-notes --title "LowDeck $GITHUB_REF_NAME"
-
-  # PC: lowdeck-agent.exe + lowdeck-desktop.exe aynı klasörde çalışır (ADR-0004); Release'i yukarıdaki job açar.
-  pc:
-    needs: release
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p lowdeck-agent -p lowdeck-desktop
-      - name: Zip + sha256 → Release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $tag = $env:GITHUB_REF_NAME
-          $dir = "lowdeck-pc"
-          New-Item -ItemType Directory $dir | Out-Null
-          Copy-Item target/release/lowdeck-agent.exe, target/release/lowdeck-desktop.exe $dir
-          @(
-            "LowDeck PC $tag",
-            "",
-            "1. Bu klasördeki iki exe'yi %LOCALAPPDATA%\LowDeck\ içine kopyalayın (ikisi aynı klasörde olmalı).",
-            "2. lowdeck-agent.exe'yi bir kez çalıştırın; tray ikonu > 'Windows ile başlat'.",
-            "3. Telefon ayarı: tray ikonu > ilk satır (host/port/token). PC arayüzü: LowMonitor tray > 'Arayüzü aç'."
-          ) | Set-Content -Encoding utf8 "$dir/KURULUM.txt"
-          $zip = "lowdeck-pc-$tag.zip"
-          Compress-Archive -Path "$dir/*" -DestinationPath $zip
-          $h = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
-          "$h  $zip" | Set-Content -Encoding ascii -NoNewline "$zip.sha256"
-          gh release upload $tag $zip "$zip.sha256"
