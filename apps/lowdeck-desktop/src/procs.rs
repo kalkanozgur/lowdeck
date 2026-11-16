@@ -36,10 +36,15 @@ pub enum SortBy {
     Ram,
 }
 
-/// Önceki taramanın CPU zamanları; ölen süreçler her taramada düşer.
+/// CPU yumuşatma (EMA, α = 0,3 ≈ son 3 örnek): gösterilen değer ve sıralama bununla → liste zıplamaz.
+pub fn ema(prev: Option<u16>, v: u16) -> u16 {
+    prev.map_or(v, |p| (p as i32 + (v as i32 - p as i32) * 3 / 10) as u16)
+}
+
+/// Önceki taramanın CPU zamanları ve yumuşatılmış CPU; ölen süreçler her taramada düşer.
 #[derive(Default)]
 pub struct Tracker {
-    prev: HashMap<(u32, i64), u64>,
+    prev: HashMap<(u32, i64), (u64, Option<u16>)>,
     prev_ms: Option<u64>,
 }
 
@@ -52,13 +57,16 @@ impl Tracker {
             .into_iter()
             .map(|p| {
                 let key = (p.pid, p.ctime);
+                // İlk ölçüm yumuşatılmaz (0'dan başlamasın); ilk taramada değer yok → None
                 let cpu = match self.prev.get(&key) {
-                    Some(&old) if cap_100ns > 0 => {
-                        (p.cpu_100ns.saturating_sub(old).saturating_mul(10_000) / cap_100ns).min(10_000) as u16
+                    Some(&(old, smooth)) if cap_100ns > 0 => {
+                        let raw = (p.cpu_100ns.saturating_sub(old).saturating_mul(10_000) / cap_100ns).min(10_000);
+                        Some(ema(smooth, raw as u16))
                     }
-                    _ => 0,
+                    _ => None,
                 };
-                next.insert(key, p.cpu_100ns);
+                next.insert(key, (p.cpu_100ns, cpu));
+                let cpu = cpu.unwrap_or(0);
                 Row { pid: p.pid, ctime: p.ctime, name: p.name, cpu, ws_mb: (p.ws_bytes >> 20) as u32 }
             })
             .collect();
@@ -145,6 +153,14 @@ mod tests {
         t.reset();
         let r = t.update(9_000, 4, vec![p(10, 1, 99_000_000, 50)], SortBy::Cpu);
         assert_eq!(r[0].cpu, 0);
+    }
+
+    #[test]
+    fn ema_smooths() {
+        assert_eq!(ema(None, 500), 500);
+        assert_eq!(ema(Some(1000), 0), 700);
+        assert_eq!(ema(Some(0), 1000), 300);
+        assert_eq!(ema(Some(10_000), 10_000), 10_000);
     }
 
     #[test]

@@ -19,7 +19,7 @@
 - [ ] Süreçler: `kill_elevated` UAC yolu canlı doğrulanmadı (aynı kullanıcının yönetici süreci UAC'siz kapanıyor; yalnız başka kullanıcı/SYSTEM'de tetiklenir)
 - [x] Geçmiş: Windows'ta gerçek LM ile 1 sa / 24 sa / 7 g yanıt süresi (en kötü 143 ms)
 - [x] Masaüstü Canlı grafikleri: Windows'ta boşta CPU / private bytes (exe boyutu: kullanıcı kararıyla ölçülmüyor)
-- [ ] Masaüstü private ≈ 100 MiB (femtovg/OpenGL sürücüsü?); software renderer ile karşılaştır
+- [x] Masaüstü private ≈ 100 MiB → software renderer: 5 MiB, CPU 8 → 1 ms/s
 - [x] Agent: LM pipe `All pipe instances are busy` (231) → 100 ms × ≤ 10 yeniden deneme
 - [ ] Telefondan "PC'yi bul" + firewall (UDP 47811 / TCP 47810) gerçek Wi-Fi'da
 - [ ] `lowmon-proto` rev'i LowMonitor sürümleriyle birlikte güncelle (pipe `PROTO` artarsa agent `servis: BadHello` loglar)

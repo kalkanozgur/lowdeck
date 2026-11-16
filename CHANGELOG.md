@@ -3,6 +3,8 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 
 ## [Unreleased]
 ### Düzeltildi
+- Masaüstü: Canlı kartları eşit genişlikte (değer değişince kayıyordu); Top-5 ve Süreçler CPU'su yumuşatılmış (EMA, ≈ 3 örnek), isimler her güncellemede yer değiştirmiyor.
+- Masaüstü: Slint software renderer (femtovg/OpenGL yerine): özel bellek ≈ 94 → 5 MiB, Canlı açıkken CPU ≈ 8 → 1 ms/s.
 - Agent: LowMonitor pipe'ının tüm örnekleri meşgulken (231) olay/geçmiş sorgusu ve abonelik boş dönmek yerine ≤ 1 s bekleyip yeniden dener.
 - Agent: `bind` IP'si bu PC'de yoksa (DHCP adresi değiştirdi) hata kutusu yerine şu anki LAN IP'sinde dinler ve log'a yazar; başlangıç hatası da log'a yazılır.
 
