@@ -17,6 +17,7 @@ use lowdeck_proto::{
     EventItem, HistPoint, Metrics, TopItem, C2S, DEFAULT_PORT, HIST_POINTS_MAX, S2C, TOPIC_EVENTS, TOPIC_METRICS,
 };
 use slint::{Model, ModelRc, VecModel};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 const HISTORY_MS: u64 = 24 * 3_600_000;
@@ -412,6 +413,8 @@ thread_local! {
     static MINIMIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static PROCS: std::cell::RefCell<ProcUi> = std::cell::RefCell::new(ProcUi::default());
     static HQ: std::cell::RefCell<HistRx> = std::cell::RefCell::new(HistRx::default());
+    /// Top-5 yumuşatılmış CPU (ad, aynı adın sırası) → değer; yalnız son listedekiler tutulur.
+    static TOP_EMA: std::cell::RefCell<HashMap<(String, u8), u16>> = std::cell::RefCell::new(HashMap::new());
     /// Oturumda agent başlatma denendi mi (ilk kopmada bir kez).
     static AGENT_TRIED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static QUERY: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
@@ -470,7 +473,7 @@ fn apply(ui: &MainWindow, ev: Event, offset: i64) {
             set_vec(ui.get_lm_top(), Vec::new(), |v| ui.set_lm_top(v));
         }
         Event::Msg(S2C::Metrics(Some(m))) => show_metrics(ui, &m),
-        Event::Msg(S2C::Top(t)) => set_vec(ui.get_lm_top(), t.iter().map(top_row).collect(), |v| ui.set_lm_top(v)),
+        Event::Msg(S2C::Top(t)) => set_vec(ui.get_lm_top(), smooth_top(&t).iter().map(top_row).collect(), |v| ui.set_lm_top(v)),
         Event::Msg(S2C::Alarms(a)) => ui.set_alarms(a.join(", ").into()),
         Event::Msg(S2C::Event(e)) => {
             // Aktif liste agent'ta da tutulur; burada yalnız gösterim için güncellenir.
@@ -627,6 +630,28 @@ fn clear_graphs(ui: &MainWindow) {
     ] {
         set(ui, "".into());
     }
+}
+
+/// Top-5'i EMA ile yumuşatıp ona göre sıralar (anlık sıralamada isimler her saniye yer değiştiriyordu).
+// shortcut: aynı adlı süreçler (ör. iki claude.exe) LM'den PID'siz gelir; anahtar = (ad, geliş sırası), sıra değişirse değerleri karışabilir
+fn smooth_top(t: &[TopItem]) -> Vec<TopItem> {
+    TOP_EMA.with(|m| {
+        let mut m = m.borrow_mut();
+        let mut next = HashMap::with_capacity(t.len());
+        let mut out: Vec<TopItem> = t
+            .iter()
+            .map(|it| {
+                let n = next.keys().filter(|(name, _): &&(String, u8)| *name == it.name).count() as u8;
+                let key = (it.name.clone(), n);
+                let cpu = procs::ema(m.get(&key).copied(), it.cpu);
+                next.insert(key, cpu);
+                TopItem { cpu, ..it.clone() }
+            })
+            .collect();
+        *m = next;
+        out.sort_by_key(|i| std::cmp::Reverse(i.cpu));
+        out
+    })
 }
 
 fn top_row(t: &TopItem) -> TopRow {

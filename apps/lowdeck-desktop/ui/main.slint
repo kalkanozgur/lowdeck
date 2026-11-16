@@ -122,6 +122,9 @@ component Stat inherits Rectangle {
     background: Theme.surface;
     border-radius: 8px;
     min-height: 124px;
+    // Eşit genişlik: değer metni uzunluğu kartı büyütmesin (her saniye kayıyordu); HistCard ile aynı.
+    preferred-width: 0px;
+    min-width: 0px;
     horizontal-stretch: 1;
     VerticalLayout {
         padding: 10px;
