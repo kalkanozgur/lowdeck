@@ -1,6 +1,6 @@
 # ADR-0007: PC keşfi: UDP sorgu–yanıt (beacon yayını yok)
 - Tarih: 2026-11-15
-- Durum: Kabul (PROTOCOL.md §5 taslağının yerine geçer)
+- Durum: Kabul (PROTOCOL.md §5 taslağının yerine geçer). **Taşınıyor:** LM ADR-0031 (2026-11-16) ile kod LowMonitor'a geçer; karar orada sürer
 
 ## Bağlam
 Telefon ayarında PC IP'si elle giriliyor. Taslak (§5): agent 5 s'de bir UDP beacon yayınlar, istemci ayar ekranında dinler. Bu, agent'ta ve LAN'daki her cihazda sürekli uyanma demek (5 s × günde 17 280 paket); CLAUDE.md §5 "periyodik iş yok" kuralıyla çelişir.

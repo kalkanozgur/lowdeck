@@ -1,6 +1,6 @@
 # ADR-0003: Agent, LowMonitor PC arayüzünün köprüsü (loopback + olaylar)
 - Tarih: 2026-11-15
-- Durum: Kabul (LowMonitor ADR-0029'un LowDeck tarafı; ADR-0002'yi genişletir)
+- Durum: Kabul (LowMonitor ADR-0029'un LowDeck tarafı; ADR-0002'yi genişletir). **Taşınıyor:** LM ADR-0031 (2026-11-16) ile kod LowMonitor'a geçer; karar orada sürer
 
 ## Bağlam
 LowMonitor ADR-0029 (seçenek B): LowMonitor'un PC arayüzü LowDeck masaüstü uygulaması olacak, veri yalnız `lowdeck-agent` üzerinden gelecek. İlk teslimat Canlı + Olaylar; telefon kapsamı sonra.

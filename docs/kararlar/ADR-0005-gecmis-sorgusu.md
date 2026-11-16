@@ -1,6 +1,6 @@
 # ADR-0005: Metrik geçmişi sorgusu (proto v4, agent'ta kovalama)
 - Tarih: 2026-11-15
-- Durum: Kabul (ADR-0003'ü genişletir; LM spek §9.3)
+- Durum: Kabul (ADR-0003'ü genişletir; LM spek §9.3). **Taşınıyor:** LM ADR-0031 (2026-11-16) ile kod LowMonitor'a geçer; karar orada sürer
 
 ## Bağlam
 LM spek §9.3 "Geçmiş": zaman aralığı → `QueryRange`, aralık > 6 saat → 1 dk çözünürlük. Masaüstü pipe'a bağlanmaz (ADR-0003); veri agent üzerinden gelmeli.
