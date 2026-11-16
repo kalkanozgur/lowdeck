@@ -2,6 +2,8 @@
 Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve commit).
 
 ## [Unreleased]
+### Eklendi
+- Telefon: "AI" bölümü (PC'nin üstünde) — Claude oturum/hafta kullanımı, kalan süre, PC'nin tempo rengi. Protokol: `TOPIC_AI` + `S2C::Ai` (ek varyant, sürüm 4; LM ADR-0032)
 ### Kaldırıldı
 - PC tarafı (`lowdeck-agent`, `lowdeck-desktop`) LowMonitor'a taşındı (LM ADR-0031): sunucu LowMonitor tray'de, arayüz `lowmon-ui`. Release artık yalnız APK; telefon ayarı (token/port) değişmez.
 ### Değişti
