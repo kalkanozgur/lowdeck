@@ -30,7 +30,7 @@ S → C  Media(MediaState)                 # tam durum
 | 1 | `Ping` | `u32` | 25 s'de bir; sunucu `Pong` ile aynı sayıyı döner |
 | 2 | `Audio` | `AudioCmd` | |
 | 3 | `Media` | `MediaCmd` | |
-| 4 | `Subscribe` | `Topics = u8` | bit 0 `TOPIC_METRICS`, bit 1 `TOPIC_EVENTS`; `0` = hepsinden çık. Bağlantı başına; istemci her `Welcome`'dan sonra yeniden gönderir |
+| 4 | `Subscribe` | `Topics = u8` | bit 0 `TOPIC_METRICS`, bit 1 `TOPIC_EVENTS`, bit 2 `TOPIC_AI`; `0` = hepsinden çık. Bağlantı başına; istemci her `Welcome`'dan sonra yeniden gönderir |
 | 5 | `QueryEvents` | `from_ms, to_ms: u64` | LowMonitor olay geçmişi; yanıt `Events` parçaları, boş = bitti (ADR-0003) |
 | 6 | `QueryHistory` | `from_ms, to_ms: u64, points: u16` | Metrik geçmişi `points` kovada (≤ 600, sunucu kırpar); yanıt `History` parçaları, boş = bitti (v4, ADR-0005) |
 
@@ -53,6 +53,9 @@ S → C  Media(MediaState)                 # tam durum
 | 8 | `Event` | `EventItem`: yeni olay (`TOPIC_EVENTS`) |
 | 9 | `Events` | `Vec<EventItem>` (≤ 50): `QueryEvents` parçası, boş = bitti |
 | 10 | `History` | `from_ms, step_ms: u64, points: Vec<Option<HistPoint>>` (≤ 100): `QueryHistory` parçası, boş = bitti (v4) |
+| 11 | `Ai` | `Option<AiUsage>` (`TOPIC_AI`): Claude kullanımı; `None` = PC'de veri yok. Ek varyant, `PROTO_VERSION` 4 (LM ADR-0032) |
+
+`AiUsage`: `session`, `week: Option<AiWindow>`, `fetched_at: u64` (Unix s), `stale: bool` (eski → soluk), `source`, `error: String` (≤ 120 karakter, sır yok). `AiWindow`: `pct: u16` (0,1 %; 1000 = %100), `resets_at: u64` (Unix s, 0 = bilinmiyor), `level: u8` (PC'nin tempo/eşik seviyesi: 0 normal, 1 uyarı, 2 kritik). Metin ve geri sayımı istemci kendi saatiyle üretir.
 
 `Metrics` (postcard varint; küçük birim = az bayt, 8 çekirdekte ≈ 30 B):
 | Alan | Tip | Birim |
@@ -75,6 +78,8 @@ S → C  Media(MediaState)                 # tam durum
 - 60 s boyunca istemciden hiçbir şey gelmezse bağlantı kapatılabilir.
 - Metrikler (ADR-0002 seçenek a): agent, istemci `TOPIC_METRICS`'e aboneyken `\\.\pipe\LowMonitor`'a `Viewer` olarak bağlanır (`Subscribe { CH_SAMPLE | CH_TOP, rate_ms: 2000 }`) ve her örneği `Metrics`, her Top-N'i `Top` olarak push eder. Önbellek yok: abone olunca ilk veri ≤ 2 s içinde gelir. Abonelik bitince (ya da istemci düşünce) pipe ≤ 2 s içinde kapanır; abone yokken agent'ta uyanma yok. Servis yoksa `Metrics(None)` gönderilir, abonelik sürdükçe 10 s'de bir yeniden denenir.
 - Olaylar (ADR-0003): metrik ya da olay abonesi varken pipe aboneliği `CH_SAMPLE | CH_TOP | CH_EVENT`. Agent aktif alarm listesini önbelleğe alır (pipe `Alarms` + Raise/Clear olayları); yeni `TOPIC_EVENTS` abonesine önce `Alarms`, sonra her olay `Event`. Pipe koparsa liste boşaltılır. `Subscribe(0)`, dokununca `Subscribe(TOPIC_METRICS)` gönderir.
+
+- AI (LM ADR-0032): `TOPIC_AI` abonesine önce son durum (`Ai`), sonra sunucu durumu değiştikçe `Ai` (≈ 3 dk'da bir, yalnız Claude açıkken sorgu). Önbellekli; abone yokken ek iş yok.
 
 - Geçmiş (v4, ADR-0005): `QueryHistory` → agent ayrı kısa pipe bağlantısıyla `QueryRange` ister (aralık > 6 sa → `Resolution::Minute`, değilse `Raw`), öğeleri akış halinde kovalar (`Sample` ortalama + max, `Agg{Avg}` ortalama, `Agg{Max}` CPU max; `Gap`/`Min`/`Event` yok sayılır). Sorgu istemcinin okuma thread'inde bloklu çalışır; diğer yuva etkilenmez.
 

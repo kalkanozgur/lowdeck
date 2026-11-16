@@ -12,6 +12,7 @@ use std::io::{self, Read, Write};
 
 /// v2: `Subscribe` / `Metrics` / `Top`. v3: olaylar (`TOPIC_EVENTS`, `Alarms`, `Event`, `QueryEvents`; ADR-0003).
 /// v4: metrik geçmişi (`QueryHistory`, `History`; ADR-0005).
+/// v4 ek: `TOPIC_AI` + `S2C::Ai` (LM ADR-0032). Yalnız abone olana gider → eski istemci etkilenmez, sürüm aynı.
 pub const PROTO_VERSION: u16 = 4;
 pub const DEFAULT_PORT: u16 = 47810;
 pub const MAX_FRAME: usize = 4096;
@@ -43,6 +44,8 @@ pub type Topics = u8;
 pub const TOPIC_METRICS: Topics = 1;
 /// LowMonitor alarm/sistem olayları: önce `S2C::Alarms` (aktif liste), sonra her olay `S2C::Event`.
 pub const TOPIC_EVENTS: Topics = 2;
+/// LowMonitor AI (Claude) kullanımı: abonelikte son durum, sonra her değişiklik `S2C::Ai` (LM ADR-0032).
+pub const TOPIC_AI: Topics = 4;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum AudioCmd {
@@ -84,6 +87,38 @@ pub enum S2C {
     /// `QueryHistory` yanıt parçası (≤ `HIST_PER_FRAME` kova), sırayla; boş `points` = bitti.
     /// Kova i: `[from_ms + i·step_ms, +step_ms)` (i, baştan itibaren tüm parçalarda sürer). `None` = veri yok.
     History { from_ms: u64, step_ms: u64, points: Vec<Option<HistPoint>> },
+    /// `TOPIC_AI`: Claude abonelik kullanımı. `None` = PC'de veri yok (hiç sorgulanmadı).
+    Ai(Option<AiUsage>),
+}
+
+/// `AiUsage::source` / `error` bu uzunlukta kırpılır (sunucu) → `MAX_FRAME` aşılmaz.
+pub const AI_TEXT_MAX: usize = 120;
+
+/// Claude kullanımı (LM `lowmon-ai`). Metin ve geri sayımı istemci kendi saatiyle üretir.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct AiUsage {
+    /// 5 saatlik oturum penceresi
+    pub session: Option<AiWindow>,
+    /// 7 günlük pencere
+    pub week: Option<AiWindow>,
+    /// Son başarılı sorgu, Unix s
+    pub fetched_at: u64,
+    /// Veri eski (son sorgu hatalı, Claude kapalı ya da gecikmiş) → soluk göster
+    pub stale: bool,
+    /// "OAuth" | "Web"
+    pub source: String,
+    /// Son sorgu hatası; boş = yok. Sır içermez.
+    pub error: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+pub struct AiWindow {
+    /// Kullanım, 0.1 % (1000 = %100; aşabilir)
+    pub pct: u16,
+    /// Sıfırlanma, Unix s; 0 = bilinmiyor
+    pub resets_at: u64,
+    /// PC'nin renk seviyesi (tempo/eşik ayarıyla): 0 normal, 1 uyarı, 2 kritik
+    pub level: u8,
 }
 
 /// Bir sorgudaki en fazla kova (masaüstü grafiği genişliği).
@@ -354,6 +389,25 @@ mod tests {
         let mut wire = Vec::new();
         write_frame(&mut wire, &msg).unwrap();
         assert!(wire.len() <= MAX_FRAME, "history {} bayt", wire.len());
+    }
+
+    /// En kötü durum AI çerçevesi sınıra sığar, gidiş-dönüş aynı.
+    #[test]
+    fn ai_fits_frame() {
+        let w = AiWindow { pct: u16::MAX, resets_at: u64::MAX, level: 2 };
+        let msg = S2C::Ai(Some(AiUsage {
+            session: Some(w),
+            week: Some(w),
+            fetched_at: u64::MAX,
+            stale: true,
+            source: "ş".repeat(AI_TEXT_MAX),
+            error: "ş".repeat(AI_TEXT_MAX),
+        }));
+        let mut wire = Vec::new();
+        write_frame(&mut wire, &msg).unwrap();
+        assert!(wire.len() <= 640, "ai {} bayt", wire.len());
+        let mut buf = [0u8; MAX_FRAME];
+        assert_eq!(read_frame::<_, S2C>(&mut &wire[..], &mut buf).unwrap(), msg);
     }
 
     #[test]

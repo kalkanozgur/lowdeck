@@ -9,7 +9,9 @@ mod discover;
 
 use config::AppConfig;
 use lowdeck_client::{Client, Config, Event};
-use lowdeck_proto::{AudioCmd, MediaCmd, Metrics, TopItem, PROTO_VERSION, S2C, TOPIC_METRICS};
+use lowdeck_proto::{
+    AiUsage, AiWindow, AudioCmd, MediaCmd, Metrics, Topics, TopItem, PROTO_VERSION, S2C, TOPIC_AI, TOPIC_METRICS,
+};
 use slint::{Model, ModelRc, VecModel};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -27,11 +29,16 @@ const LOCAL_ECHO_GUARD: Duration = Duration::from_millis(400);
 /// Bu süre dokunulmazsa siyah perde iner.
 const BLACKOUT_AFTER: Duration = Duration::from_secs(120);
 
+/// Ekran açıkken abone olunan konular: PC metrikleri + AI kullanımı (LM ADR-0032).
+const TOPICS: Topics = TOPIC_METRICS | TOPIC_AI;
+
 /// Yaşam döngüsü kancası (true = öne geldi). `run` kurar, Android olay dinleyicisi çağırır.
 type ActiveHook = Box<dyn Fn(bool)>;
 
 thread_local! {
     static ON_ACTIVE: RefCell<Option<ActiveHook>> = const { RefCell::new(None) };
+    /// Son AI durumu: geri sayım her metrik push'unda (≈2 s) telefonun saatiyle yenilenir.
+    static LAST_AI: RefCell<Option<AiUsage>> = const { RefCell::new(None) };
 }
 
 #[cfg(target_os = "android")]
@@ -105,7 +112,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
             );
             // Perde inikken metrik yok: ekranda görünmeyen veri için PC de telefon da uyanmasın.
             if !ui.get_blackout() {
-                c.subscribe(TOPIC_METRICS);
+                c.subscribe(TOPICS);
             }
             *client.borrow_mut() = Some(c);
         }
@@ -122,6 +129,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
             if let Some(ui) = weak.upgrade() {
                 ui.set_blackout(true);
                 ui.set_lm_state(0);
+                ui.set_ai_state(0);
             }
             if let Some(c) = client.borrow().as_ref() {
                 c.subscribe(0);
@@ -138,7 +146,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                 ui.set_blackout(false);
             }
             if let Some(c) = client.borrow().as_ref() {
-                c.subscribe(TOPIC_METRICS); // değişmediyse gönderilmez
+                c.subscribe(TOPICS); // değişmediyse gönderilmez
             }
         }
     };
@@ -321,6 +329,7 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
             ui.set_connected(false);
             ui.set_status(format!("Koptu: {reason}").into());
             ui.set_lm_state(0);
+            ui.set_ai_state(0);
         }
         Event::Msg(S2C::Audio(a)) => {
             if last_local_edit.lock().unwrap().elapsed() >= LOCAL_ECHO_GUARD {
@@ -341,7 +350,14 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
             set_vec(ui.get_lm_cores(), Vec::new(), |v| ui.set_lm_cores(v));
             set_vec(ui.get_lm_top(), Vec::new(), |v| ui.set_lm_top(v));
         }
-        Event::Msg(S2C::Metrics(Some(m))) => show_metrics(ui, &m),
+        Event::Msg(S2C::Metrics(Some(m))) => {
+            show_metrics(ui, &m);
+            LAST_AI.with_borrow(|a| show_ai(ui, a.as_ref(), unix_now()));
+        }
+        Event::Msg(S2C::Ai(a)) => {
+            show_ai(ui, a.as_ref(), unix_now());
+            LAST_AI.set(a);
+        }
         Event::Msg(S2C::Top(t)) => {
             let rows = t.iter().map(top_row).collect();
             set_vec(ui.get_lm_top(), rows, |v| ui.set_lm_top(v));
@@ -358,6 +374,61 @@ fn show_metrics(ui: &MainWindow, m: &Metrics) {
     ui.set_lm_net(format!("↓ {}  ↑ {}", rate(m.net_rx_kbps), rate(m.net_tx_kbps)).into());
     let cores = m.cores.iter().map(|&c| c as f32 / 200.0).collect();
     set_vec(ui.get_lm_cores(), cores, |v| ui.set_lm_cores(v));
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// AI bölümü; `None` = PC'de veri yok.
+fn show_ai(ui: &MainWindow, a: Option<&AiUsage>, now: u64) {
+    let Some(a) = a else {
+        ui.set_ai_state(2);
+        return;
+    };
+    ui.set_ai_state(1);
+    // 3 = soluk (eski veri), aksi halde PC'nin seviyesi
+    let level = |w: &Option<AiWindow>| if a.stale { 3 } else { w.map_or(0, |w| w.level.min(2) as i32) };
+    ui.set_ai_session(ai_line("Oturum", &a.session, now).into());
+    ui.set_ai_week(ai_line("Hafta", &a.week, now).into());
+    ui.set_ai_session_level(level(&a.session));
+    ui.set_ai_week_level(level(&a.week));
+    ui.set_ai_note(ai_note(a, now).into());
+}
+
+/// "Oturum %33 · 4s16dk" (LM taskbar ile aynı biçim).
+fn ai_line(label: &str, w: &Option<AiWindow>, now: u64) -> String {
+    match w {
+        None => format!("{label} —"),
+        Some(w) => {
+            let left = if w.resets_at == 0 { "—".into() } else { remaining(w.resets_at as i64 - now as i64) };
+            format!("{label} %{} · {left}", (w.pct + 5) / 10)
+        }
+    }
+}
+
+/// Sağ üst not: hata > eski > kaynak.
+fn ai_note(a: &AiUsage, now: u64) -> String {
+    if !a.error.is_empty() {
+        a.error.clone()
+    } else if a.stale {
+        format!("eski · {} dk önce", now.saturating_sub(a.fetched_at) / 60)
+    } else {
+        a.source.clone()
+    }
+}
+
+/// Geri sayım: "2g05s", "3s07dk", "12dk"; negatif → 0.
+fn remaining(secs: i64) -> String {
+    let s = secs.max(0);
+    let (d, h, m) = (s / 86_400, s % 86_400 / 3600, s % 3600 / 60);
+    if d > 0 {
+        format!("{d}g{h:02}s")
+    } else if h > 0 {
+        format!("{h}s{m:02}dk")
+    } else {
+        format!("{m}dk")
+    }
 }
 
 fn top_row(t: &TopItem) -> TopRow {
@@ -387,6 +458,25 @@ fn set_vec<T: Clone + 'static>(cur: ModelRc<T>, v: Vec<T>, set: impl FnOnce(Mode
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn ai_text() {
+        let w = Some(AiWindow { pct: 334, resets_at: 1_000 + 4 * 3600 + 16 * 60, level: 1 });
+        assert_eq!(ai_line("Oturum", &w, 1_000), "Oturum %33 · 4s16dk");
+        assert_eq!(ai_line("Hafta", &None, 0), "Hafta —");
+        let w = Some(AiWindow { pct: 1000, resets_at: 0, level: 2 });
+        assert_eq!(ai_line("Hafta", &w, 0), "Hafta %100 · —");
+        assert_eq!(remaining(2 * 86_400 + 5 * 3600), "2g05s");
+        assert_eq!(remaining(-5), "0dk");
+        let mut a = AiUsage { fetched_at: 100, source: "OAuth".into(), ..Default::default() };
+        assert_eq!(ai_note(&a, 200), "OAuth");
+        a.stale = true;
+        assert_eq!(ai_note(&a, 100 + 720), "eski · 12 dk önce");
+        a.error = "OAuth: token süresi dolmuş".into();
+        assert_eq!(ai_note(&a, 0), "OAuth: token süresi dolmuş");
+    }
+
     #[test]
     fn rate_units() {
         assert_eq!(super::rate(0), "0K");
