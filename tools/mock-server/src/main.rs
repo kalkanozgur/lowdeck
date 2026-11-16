@@ -137,6 +137,7 @@ fn handle(stream: TcpStream, token: &str) -> Result<(), FrameError> {
                 write_frame(&mut wr, &S2C::History { from_ms, step_ms, points: vec![] })?;
             }
             C2S::Hello { .. } => write_frame(&mut wr, &S2C::Error(ErrorCode::Unsupported))?,
+            C2S::Lock => println!("<< Lock"),
         }
     }
 }

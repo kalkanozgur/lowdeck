@@ -26,4 +26,4 @@
 
 ## Fikirler
 - Rafta (kullanıcı, 2026-11-15): Süreçler'de öncelik / EcoQoS / affinity
-- Tuş kilidi (Faz 5, karar bekliyor)
+- Tuş kilidi (Faz 5, ADR-0008): telefonda kilit düğmesi; biyometri/PIN ile PC kilidini açma + durum
