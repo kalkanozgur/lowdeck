@@ -2,6 +2,9 @@
 Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve commit).
 
 ## [Unreleased]
+### Düzeltildi
+- Agent: `bind` IP'si bu PC'de yoksa (DHCP adresi değiştirdi) hata kutusu yerine şu anki LAN IP'sinde dinler ve log'a yazar; başlangıç hatası da log'a yazılır.
+
 ### Eklendi
 - **PC keşfi** (ADR-0007): telefon ayarında "PC'yi bul" → UDP 47811 sorgu, agent adres + port + PC adı ile yanıtlar (token yok); sonuca dokununca host/port dolar. Firewall kuralı artık UDP 47811'i de içerir (var olan kural için menüden bir kez daha çalıştırın). Mock da yanıtlar.
 - Masaüstü **Süreçler** sekmesi: tüm süreçler (CPU/RAM sıralı, 2 s, yalnız sekme açıkken), iki aşamalı onayla **Sonlandır**; PID yeniden kullanım kontrolü, korumalı süreçler, yetki yetmezse UAC ile yükseltilmiş kopya (ADR-0006)

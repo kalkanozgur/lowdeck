@@ -473,8 +473,17 @@ impl Running {
 
 /// 0.0.0.0 değil: seçilen arayüz (ADR-0002) + PC arayüzü için 127.0.0.1 (ADR-0003, firewall gerekmez).
 /// Loopback açılamazsa telefon tarafı yine çalışır.
-fn listen(cfg: AgentConfig, hub: &Arc<Hub>, backend: &Arc<dyn Backend>) -> std::io::Result<Running> {
-    let lan = TcpListener::bind((cfg.bind.as_str(), cfg.port))?;
+fn listen(mut cfg: AgentConfig, hub: &Arc<Hub>, backend: &Arc<dyn Backend>) -> std::io::Result<Running> {
+    let lan = match TcpListener::bind((cfg.bind.as_str(), cfg.port)) {
+        // DHCP adresi değiştirdi (10049): şu anki LAN IP'sine düş; keşif telefona yeni adresi bildirir. cfg dosyası değişmez.
+        Err(e) if e.kind() == std::io::ErrorKind::AddrNotAvailable => {
+            let ip = lan_ip();
+            log!("{} bu PC'de yok, {ip} kullanılıyor", cfg.bind);
+            cfg.bind = ip;
+            TcpListener::bind((cfg.bind.as_str(), cfg.port))?
+        }
+        r => r?,
+    };
     let lan_addr = lan.local_addr()?;
     let mut listeners = vec![lan];
     if !lan_addr.ip().is_loopback() {
@@ -586,7 +595,10 @@ fn main() {
     // Konsol yok: başlangıç hatası kullanıcıya kutuyla gösterilir.
     let mut running = match first {
         Ok(r) => Some(r),
-        Err(e) => return tray::error_box(&format!("Başlatılamadı: {e}\n\nAyar: {}", path.display())),
+        Err(e) => {
+            log!("başlatılamadı: {e}");
+            return tray::error_box(&format!("Başlatılamadı: {e}\n\nAyar: {}", path.display()));
+        }
     };
     let info_of = {
         let path = path.clone();
@@ -927,12 +939,20 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn bind_error_explains_wrong_ip() {
+        let cfg = AgentConfig { bind: "192.0.2.1".into(), port: 47810, token: "t".into() };
+        let e = std::io::Error::from_raw_os_error(10049); // WSAEADDRNOTAVAIL
+        assert!(bind_error(&cfg, &e).contains("bu PC'nin adresi değil"), "{}", bind_error(&cfg, &e));
+    }
+
+    #[test]
+    fn stale_bind_falls_back_to_lan_ip() {
         let hub = Arc::new(Hub::default());
         let backend: Arc<dyn Backend> = Arc::new(Null);
-        // TEST-NET adresi bu PC'de yok → WSAEADDRNOTAVAIL
-        let cfg = AgentConfig { bind: "192.0.2.1".into(), port: 47810, token: "t".into() };
-        let e = listen(cfg.clone(), &hub, &backend).err().expect("bind başarısız olmalı");
-        assert!(bind_error(&cfg, &e).contains("bu PC'nin adresi değil"), "{}", bind_error(&cfg, &e));
+        // TEST-NET adresi bu PC'de yok → AddrNotAvailable → lan_ip()
+        let cfg = AgentConfig { bind: "192.0.2.1".into(), port: 0, token: "t".into() };
+        let r = listen(cfg, &hub, &backend).expect("lan_ip'ye düşmeli");
+        assert_eq!(r.cfg.bind, lan_ip());
+        r.stop();
     }
 
     #[test]
