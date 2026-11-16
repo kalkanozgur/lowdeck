@@ -3,6 +3,7 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 
 ## [Unreleased]
 ### Düzeltildi
+- Agent: LowMonitor pipe'ının tüm örnekleri meşgulken (231) olay/geçmiş sorgusu ve abonelik boş dönmek yerine ≤ 1 s bekleyip yeniden dener.
 - Agent: `bind` IP'si bu PC'de yoksa (DHCP adresi değiştirdi) hata kutusu yerine şu anki LAN IP'sinde dinler ve log'a yazar; başlangıç hatası da log'a yazılır.
 
 ### Eklendi

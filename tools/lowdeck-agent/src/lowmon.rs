@@ -155,15 +155,25 @@ pub fn start(hub: Arc<Hub>) {
 #[cfg(not(windows))]
 pub fn start(_: Arc<Hub>) {}
 
+/// Pipe'ı aç; tüm örnekler meşgulse (ERROR_PIPE_BUSY 231: abonelik + sorgu aynı anda)
+/// 100 ms arayla ≤ 10 kez yeniden dener. Servis yoksa (2) hemen döner.
+#[cfg(windows)]
+fn open_pipe() -> std::io::Result<std::fs::File> {
+    let open = || std::fs::OpenOptions::new().read(true).write(true).open(lowmon_proto::proto::PIPE_NAME);
+    for _ in 0..10 {
+        match open() {
+            Err(e) if e.raw_os_error() == Some(231) => std::thread::sleep(Duration::from_millis(100)),
+            r => return r,
+        }
+    }
+    open()
+}
+
 #[cfg(windows)]
 fn run(hub: &Hub) {
     loop {
         hub.want.wait_on();
-        let r = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(lowmon_proto::proto::PIPE_NAME)
-            .and_then(|f| session(f, hub));
+        let r = open_pipe().and_then(|f| session(f, hub));
         // Abonelik bittiyse sessizce bekle; sürüyorsa servis yok/koptu.
         if hub.want.get() {
             if let Err(e) = r {
@@ -201,7 +211,7 @@ fn session(mut f: std::fs::File, hub: &Hub) -> std::io::Result<()> {
 #[cfg(windows)]
 pub fn query_events(from_ms: u64, to_ms: u64) -> std::io::Result<Vec<EventItem>> {
     use lowmon_proto::proto::{self, ClientMsg, RangeItem, Role, ServerMsg, PROTO};
-    let mut f = std::fs::OpenOptions::new().read(true).write(true).open(lowmon_proto::proto::PIPE_NAME)?;
+    let mut f = open_pipe()?;
     proto::write(&mut f, &ClientMsg::Hello { proto: PROTO, role: Role::Viewer })?;
     proto::write(&mut f, &ClientMsg::QueryEvents { from_ms, to_ms })?;
     let (mut out, mut acks) = (Vec::new(), 0);
@@ -229,7 +239,7 @@ pub fn query_events(from_ms: u64, to_ms: u64) -> std::io::Result<Vec<EventItem>>
 pub fn query_history(from_ms: u64, to_ms: u64, n: u16) -> std::io::Result<(u64, Vec<Option<HistPoint>>)> {
     use lowmon_proto::proto::{self, ClientMsg, Resolution, Role, ServerMsg, PROTO};
     let resolution = if to_ms.saturating_sub(from_ms) > MINUTE_ABOVE_MS { Resolution::Minute } else { Resolution::Raw };
-    let mut f = std::fs::OpenOptions::new().read(true).write(true).open(lowmon_proto::proto::PIPE_NAME)?;
+    let mut f = open_pipe()?;
     proto::write(&mut f, &ClientMsg::Hello { proto: PROTO, role: Role::Viewer })?;
     proto::write(&mut f, &ClientMsg::QueryRange { from_ms, to_ms, resolution })?;
     let (mut b, mut acks) = (Buckets::new(from_ms, to_ms, n), 0);
