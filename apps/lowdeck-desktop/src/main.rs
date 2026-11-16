@@ -149,6 +149,8 @@ struct ProcUi {
     /// Tarama buffer'ı (Windows), yeniden kullanılır.
     buf: Vec<u64>,
     selected: Option<(u32, i64)>,
+    /// Arama: ad (büyük/küçük harf duyarsız) ya da PID içerir.
+    filter: String,
     sort: procs::SortBy,
     confirm: bool,
     /// Yükseltilmiş kopya bekleniyor.
@@ -165,6 +167,7 @@ impl Default for ProcUi {
             rows: Vec::new(),
             buf: Vec::new(),
             selected: None,
+            filter: String::new(),
             sort: procs::SortBy::Cpu,
             confirm: false,
             busy: false,
@@ -222,11 +225,18 @@ fn procs_init(ui: &MainWindow) {
         procs_render(&ui);
     });
     let w = ui.as_weak();
-    ui.on_proc_select(move |i| {
+    ui.on_proc_filter_changed(move |f| {
+        let Some(ui) = w.upgrade() else { return };
+        PROCS.with(|p| p.borrow_mut().filter = f.to_lowercase());
+        procs_render(&ui);
+    });
+    let w = ui.as_weak();
+    // Liste filtrelenebildiği için satır indeksi değil PID gelir.
+    ui.on_proc_select(move |pid| {
         let Some(ui) = w.upgrade() else { return };
         PROCS.with(|p| {
             let mut p = p.borrow_mut();
-            let Some(r) = p.rows.get(i as usize).cloned() else { return };
+            let Some(r) = p.rows.iter().find(|r| r.pid as i32 == pid).cloned() else { return };
             p.selected = Some((r.pid, r.ctime));
             p.confirm = false;
             let lock = if procs::protected(r.pid, &r.name) { "  ·  korumalı" } else { "" };
@@ -270,6 +280,11 @@ fn procs_sync(ui: &MainWindow) {
 }
 
 fn procs_refresh(ui: &MainWindow) {
+    // Fare liste üzerindeyken ya da onay beklerken liste dondurulur: seçilecek satır kaymasın.
+    // Tarama da atlanır; sonraki taramada CPU deltası daha uzun aralıktan hesaplanır (doğru).
+    if ui.get_proc_hover() || PROCS.with(|p| p.borrow().confirm) {
+        return;
+    }
     let ncpu = std::thread::available_parallelism().map_or(1, |n| n.get() as u64);
     PROCS.with(|p| {
         let mut p = p.borrow_mut();
@@ -293,6 +308,7 @@ fn procs_render(ui: &MainWindow) {
         let rows: Vec<ProcRow> = p
             .rows
             .iter()
+            .filter(|r| procs::matches(r, &p.filter))
             .map(|r| ProcRow {
                 pid: r.pid as i32,
                 name: r.name.as_str().into(),
@@ -302,11 +318,16 @@ fn procs_render(ui: &MainWindow) {
                 selected: p.selected == Some((r.pid, r.ctime)),
             })
             .collect();
+        let rows_len = rows.len();
         set_vec(ui.get_procs(), rows, |v| ui.set_procs(v));
         let sel = p.selected.and_then(|s| p.rows.iter().find(|r| (r.pid, r.ctime) == s));
         ui.set_proc_can_kill(!p.busy && sel.is_some_and(|r| !procs::protected(r.pid, &r.name)));
         ui.set_proc_confirm(p.confirm);
-        let status = if p.status.is_empty() { format!("{} süreç", p.rows.len()) } else { p.status.clone() };
+        let status = match (p.status.is_empty(), p.filter.is_empty()) {
+            (false, _) => p.status.clone(),
+            (true, true) => format!("{} süreç", p.rows.len()),
+            (true, false) => format!("{} / {} süreç", rows_len, p.rows.len()),
+        };
         ui.set_proc_status(status.into());
     });
 }
@@ -539,8 +560,18 @@ fn event_row(e: &EventItem, offset: i64) -> EventRow {
         time: fmt_time(e.ts_ms, offset).into(),
         kind: e.kind as i32,
         name: e.name.as_str().into(),
-        value: e.value.to_string().into(),
+        value: fmt_event_value(e).into(),
     }
+}
+
+/// Alarm değeri × 100 gelir (LM); sistem olayının değeri kod → gösterilmez.
+// shortcut: birim addan tahmin (cpu_/ram_ → %); LM yeni alarm türü eklerse birim buraya
+fn fmt_event_value(e: &EventItem) -> String {
+    if e.kind == 2 {
+        return String::new();
+    }
+    let unit = if e.name.starts_with("cpu") || e.name.starts_with("ram") { "%" } else { "" };
+    format!("{:.1}{unit}", e.value as f64 / 100.0)
 }
 
 /// Tamamlanan geçmiş yanıtından 7 çizgi + ölçek etiketleri.
@@ -726,6 +757,15 @@ mod tests {
         add(&m, e(1_400, 0)); // geçmişten aynı olay (aynı saniye)
         add(&m, e(1_000, 1)); // farklı tür
         assert_eq!(m.row_count(), 3);
+    }
+
+    #[test]
+    fn event_value() {
+        let ev = |kind, name: &str, value| fmt_event_value(&EventItem { ts_ms: 0, kind, name: name.into(), value });
+        assert_eq!(ev(0, "cpu_high", 5917), "59.2%");
+        assert_eq!(ev(1, "ram_high", 10000), "100.0%");
+        assert_eq!(ev(0, "disk_x", 250), "2.5");
+        assert_eq!(ev(2, "service_start", 0), "");
     }
 
     #[test]

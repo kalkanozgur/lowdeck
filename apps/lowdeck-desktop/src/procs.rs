@@ -90,6 +90,11 @@ pub fn sort_rows(rows: &mut [Row], sort: SortBy) {
     }
 }
 
+/// Arama: `f` küçük harf; boş → hepsi. Ad içerir ya da PID içerir.
+pub fn matches(r: &Row, f: &str) -> bool {
+    f.is_empty() || r.name.to_lowercase().contains(f) || r.pid.to_string().contains(f)
+}
+
 /// Sonlandırılamaz (spek §10 yasak liste): sistemi düşürür ya da oturumu kapatır.
 pub fn protected(pid: u32, name: &str) -> bool {
     const DENY: [&str; 8] =
@@ -97,9 +102,9 @@ pub fn protected(pid: u32, name: &str) -> bool {
     pid == 0 || pid == 4 || pid == std::process::id() || DENY.iter().any(|d| name.eq_ignore_ascii_case(d))
 }
 
-/// "12.3%"; 0 → boş (liste sakin okunur).
+/// "12.3%"; < %0,05 → boş (liste sakin okunur; EMA kuyruğu "0.0%" göstermesin).
 pub fn fmt_cpu(cpu: u16) -> String {
-    if cpu == 0 {
+    if cpu < 5 {
         String::new()
     } else {
         format!("{:.1}%", cpu as f32 / 100.0)
@@ -172,6 +177,15 @@ mod tests {
     }
 
     #[test]
+    fn search() {
+        let r = Row { pid: 1234, ctime: 0, name: "Notepad.exe".into(), cpu: 0, ws_mb: 0 };
+        assert!(matches(&r, ""));
+        assert!(matches(&r, "note"));
+        assert!(matches(&r, "23"));
+        assert!(!matches(&r, "chrome"));
+    }
+
+    #[test]
     fn deny_list() {
         assert!(protected(4, "System"));
         assert!(protected(0, "Idle"));
@@ -180,6 +194,8 @@ mod tests {
         assert!(!protected(1234, "notepad.exe"));
         assert!(exit::text(exit::GONE, "a").contains("artık yok"));
         assert_eq!(fmt_cpu(0), "");
+        assert_eq!(fmt_cpu(4), "");
+        assert_eq!(fmt_cpu(5), "0.1%");
         assert_eq!(fmt_cpu(1234), "12.3%");
     }
 }

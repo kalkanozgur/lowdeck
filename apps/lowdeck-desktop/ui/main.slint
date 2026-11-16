@@ -1,7 +1,7 @@
 // LowMonitor PC arayüzü (ADR-0003): Canlı + Olaylar. Veri lowdeck-agent loopback'ten.
 // Animasyon/timer yok; yalnız property değişince yeniden çizim.
 
-import { ListView } from "std-widgets.slint";
+import { ListView, LineEdit } from "std-widgets.slint";
 
 global Theme {
     out property <color> bg: #101010;
@@ -199,7 +199,10 @@ export component MainWindow inherits Window {
     in property <bool> proc-can-kill;
     in property <bool> proc-confirm; // iki aşamalı onay: ilk tık "Emin misin?"
     in-out property <int> proc-sort: 0; // 0 = CPU, 1 = RAM
-    callback proc-select(int);
+    callback proc-select(int); // PID
+    callback proc-filter-changed(string);
+    // Fare liste üzerinde → Rust taramayı atlar, liste kaymaz.
+    in-out property <bool> proc-hover;
     callback proc-kill();
     callback proc-sort-changed(int);
     callback tab-changed(int);
@@ -350,6 +353,11 @@ export component MainWindow inherits Window {
         // --- Süreçler: tüm süreçler, CPU/RAM sıralı; sonlandırma iki aşamalı onayla (spek §10) ---
         if root.tab == 3: VerticalLayout {
             spacing: 6px;
+            LineEdit {
+                placeholder-text: "Ara: ad ya da PID";
+                font-size: 14px;
+                edited(t) => { root.proc-filter-changed(t); }
+            }
             HorizontalLayout {
                 padding-left: 6px;
                 padding-right: 6px;
@@ -373,13 +381,18 @@ export component MainWindow inherits Window {
                     TouchArea { clicked => { root.proc-sort = 1; root.proc-sort-changed(1); } }
                 }
             }
-            ListView {
+            // Üst TouchArea yalnız hover için (tıklamalar satırlara iner).
+            hover := TouchArea {
                 vertical-stretch: 1;
-                for p[i] in root.procs: Rectangle {
+                changed has-hover => { root.proc-hover = self.has-hover; }
+            ListView {
+                width: 100%;
+                height: 100%;
+                for p in root.procs: Rectangle {
                     height: 24px;
                     border-radius: 4px;
                     background: p.selected ? Theme.surface : transparent;
-                    TouchArea { clicked => { root.proc-select(i); } }
+                    TouchArea { clicked => { root.proc-select(p.pid); } }
                     HorizontalLayout {
                         padding-left: 6px;
                         padding-right: 6px;
@@ -398,11 +411,12 @@ export component MainWindow inherits Window {
                     }
                 }
             }
+            }
             HorizontalLayout {
                 spacing: 8px;
                 height: 32px;
                 Text {
-                    text: root.proc-status;
+                    text: (root.proc-hover ? "⏸ sabit  ·  " : "") + root.proc-status;
                     color: root.proc-confirm ? Theme.warn : Theme.dim;
                     font-size: 13px;
                     horizontal-stretch: 1;
@@ -424,7 +438,7 @@ export component MainWindow inherits Window {
             HorizontalLayout {
                 Text { text: "SON 24 SAAT"; color: Theme.dim; font-size: 12px; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
-                Tab { label: "Yenile"; active: false; clicked => { root.refresh-events(); } }
+                Tab { label: "Yenile"; active: true; clicked => { root.refresh-events(); } }
             }
             if root.events.length == 0: Text {
                 text: root.connected ? "Olay yok" : "—";

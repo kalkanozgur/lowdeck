@@ -3,6 +3,8 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 
 ## [Unreleased]
 ### Düzeltildi
+- Masaüstü Süreçler: arama kutusu (ad ya da PID); fare liste üzerindeyken ya da sonlandırma onayı beklenirken liste donar ("⏸ sabit"), seçim satır kaymasıyla kaçmaz; %0,05 altı CPU boş gösterilir.
+- Masaüstü Olaylar: alarm değeri yüzde olarak (59.2%), sistem olayında değer gizli; "Yenile" düğme görünümünde.
 - Masaüstü: Canlı kartları eşit genişlikte (değer değişince kayıyordu); Top-5 ve Süreçler CPU'su yumuşatılmış (EMA, ≈ 3 örnek), isimler her güncellemede yer değiştirmiyor.
 - Masaüstü: Slint software renderer (femtovg/OpenGL yerine): özel bellek ≈ 94 → 5 MiB, Canlı açıkken CPU ≈ 8 → 1 ms/s.
 - Agent: LowMonitor pipe'ının tüm örnekleri meşgulken (231) olay/geçmiş sorgusu ve abonelik boş dönmek yerine ≤ 1 s bekleyip yeniden dener.
