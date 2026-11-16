@@ -39,3 +39,10 @@ APK GitHub Actions'ta derlenir (bkz. `CLAUDE.md` Faz 0).
 5. Telefon PC'yi bulamıyor ya da bağlanamıyorsa: agent tray → **Firewall kuralı ekle (yönetici)…** (UAC; Private profil + yerel alt ağ, bu exe; TCP port + UDP 47811 keşif). Port değişirse tekrar çalıştır.
 
 Agent log'u: `%APPDATA%\LowDeck\agent.log` (1 MiB'ta `agent.log.1`'e döner); tray → **Log'u aç**.
+
+## Lisans
+MIT ya da Apache-2.0, seçim sizin ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).
+
+Arayüz [Slint](https://slint.dev) ile yapıldı ([Royalty-free 2.0](https://github.com/slint-ui/slint/blob/master/LICENSES/LicenseRef-Slint-Royalty-free-2.0.md) lisansı; atıf şartı):
+
+<a href="https://slint.dev"><img alt="Made with Slint" src="https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-light.svg" height="60"></a>

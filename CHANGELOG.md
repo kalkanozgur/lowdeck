@@ -2,6 +2,8 @@
 Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve commit).
 
 ## [Unreleased]
+### Değişti
+- Lisans: GPL-3.0-only → MIT OR Apache-2.0 (LowMonitor ile aynı; tek sahip). Slint Royalty-free 2.0 ile kullanılır, README'de atıf rozeti.
 ### Düzeltildi
 - Masaüstü Süreçler: arama kutusu (ad ya da PID); fare liste üzerindeyken ya da sonlandırma onayı beklenirken liste donar ("⏸ sabit"), seçim satır kaymasıyla kaçmaz; %0,05 altı CPU boş gösterilir.
 - Masaüstü Olaylar: alarm değeri yüzde olarak (59.2%), sistem olayında değer gizli; "Yenile" düğme görünümünde.
