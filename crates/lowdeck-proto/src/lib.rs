@@ -33,7 +33,9 @@ pub enum C2S {
     /// LowMonitor metrik geçmişi `[from_ms, to_ms)`, `points` kovaya bölünmüş (≤ `HIST_POINTS_MAX`, sunucu kırpar).
     /// Yanıt: bir ya da birkaç `S2C::History`, boş `points` = bitti.
     QueryHistory { from_ms: u64, to_ms: u64, points: u16 },
-    // İleride (SONA eklenecek): Lock(LockCmd) ...
+    /// Tuş kilidi (ADR-0008): agent cat-lock kısayolunu (Pause) gönderir. Yanıt/durum yok; açma yalnız klavyeden kod.
+    /// Ek varyant: v4 istemcileri etkilenmez, PROTO_VERSION aynı. Eski agent bu çerçeveyi çözemez → bağlantı düşer.
+    Lock,
 }
 
 pub type Topics = u8;
@@ -278,6 +280,7 @@ mod tests {
             C2S::Ping(7),
             C2S::Subscribe(TOPIC_METRICS | TOPIC_EVENTS),
             C2S::QueryEvents { from_ms: 1, to_ms: u64::MAX },
+            C2S::Lock,
         ];
         let mut wire = Vec::new();
         for m in &msgs {

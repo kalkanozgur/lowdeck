@@ -34,6 +34,8 @@ S → C  Media(MediaState)                 # tam durum
 | 5 | `QueryEvents` | `from_ms, to_ms: u64` | LowMonitor olay geçmişi; yanıt `Events` parçaları, boş = bitti (ADR-0003) |
 | 6 | `QueryHistory` | `from_ms, to_ms: u64, points: u16` | Metrik geçmişi `points` kovada (≤ 600, sunucu kırpar); yanıt `History` parçaları, boş = bitti (v4, ADR-0005) |
 
+| 7 | `Lock` | — | Tuş kilidi: agent cat-lock kısayolunu (Pause) gönderir; yanıt yok (ADR-0008). Ek varyant, `PROTO_VERSION` 4 |
+
 `AudioCmd`: `SetVolume(u8 0..=100)` · `Step(i8)` · `ToggleMute`
 `MediaCmd`: `PlayPause` · `Next` · `Prev` · `Stop`
 
@@ -86,7 +88,7 @@ S → C  Media(MediaState)                 # tam durum
 Periyodik beacon yayını yok: sorgu gelmezse ağda trafik yok. Bind loopback ise agent keşfi açmaz.
 
 ## 6. İleride (taslak, uygulanmadı)
-- `C2S::Lock(LockCmd)`, `S2C::Lock(LockState)`: tuş kilidi.
+- Tuş kilidi açma + durum (`C2S::Unlock…`, `S2C::Lock(LockState)`): telefonda biyometri/PIN sonrası (ADR-0008 "İleride").
 - Eşleştirme: LowMonitor spek §16.2 şeması (6 hane, 120 s → 256-bit token; PC'de SHA-256 hash, DPAPI; hatalı denemede 1 s gecikme, IP başına 10 hata → 10 dk ban). Gelince `PROTO_VERSION` artar.
 
 Yeni varyantlar **sona** eklenir. Mevcut alan değişirse `PROTO_VERSION` artar.

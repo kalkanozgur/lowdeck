@@ -25,7 +25,7 @@ use windows::Win32::Media::Audio::{
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_MEDIA_NEXT_TRACK,
-    VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP,
+    VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_PAUSE,
 };
 use windows::Win32::Foundation::PROPERTYKEY;
 
@@ -54,6 +54,12 @@ impl Backend for WinBackend {
     }
     fn media(&self, cmd: MediaCmd) {
         let _ = self.media.send(MediaMsg::Cmd(cmd));
+    }
+    /// cat-lock (yönetici) kısayolu: LL hook enjekte Pause'u da kabul eder (2026-11-16 denendi). UIPI SendInput'u
+    /// yalnız yönetici ön plan penceresine engeller; hook yine görür. cat-lock yoksa tuş ön plandaki uygulamaya gider.
+    fn lock(&self) {
+        media_key(VK_PAUSE);
+        log!("kilit: Pause gönderildi");
     }
     fn events(&self, from_ms: u64, to_ms: u64) -> Vec<lowdeck_proto::EventItem> {
         crate::lowmon::query_events(from_ms, to_ms).unwrap_or_else(|e| {

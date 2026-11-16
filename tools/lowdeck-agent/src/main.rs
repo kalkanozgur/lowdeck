@@ -290,6 +290,8 @@ fn server_name() -> String {
 pub trait Backend: Send + Sync {
     fn audio(&self, cmd: AudioCmd);
     fn media(&self, cmd: MediaCmd);
+    /// Tuş kilidi (ADR-0008); varsayılan: yok.
+    fn lock(&self) {}
     /// LowMonitor olay geçmişi (pipe `QueryEvents`); hata/servis yok → boş.
     fn events(&self, _from_ms: u64, _to_ms: u64) -> Vec<EventItem> {
         Vec::new()
@@ -354,6 +356,7 @@ fn session(
             // Sonuç Windows olayı ile (gerçekten değişirse) push edilir.
             C2S::Audio(cmd) => backend.audio(cmd),
             C2S::Media(cmd) => backend.media(cmd),
+            C2S::Lock => backend.lock(),
             C2S::Subscribe(t) => hub.subscribe(id, t),
             // Bu istemcinin okuma thread'inde bloklu; diğer istemciler etkilenmez.
             C2S::QueryEvents { from_ms, to_ms } => {
@@ -881,6 +884,32 @@ mod tests {
             }
         }
         assert_eq!(n, usize::from(HIST_POINTS_MAX));
+    }
+
+    struct Locks(std::sync::atomic::AtomicU32);
+    impl Backend for Locks {
+        fn audio(&self, _: AudioCmd) {}
+        fn media(&self, _: MediaCmd) {}
+        fn lock(&self) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// C2S::Lock (ADR-0008) backend'e iner; yanıt yok, bağlantı açık kalır.
+    #[test]
+    fn lock_reaches_backend() {
+        let hub = Arc::new(Hub::default());
+        let b = Arc::new(Locks(Default::default()));
+        let (mut w, mut rd) = client(serve(&hub, SLOT_LOCAL, b.clone()));
+        let mut buf = [0u8; MAX_FRAME];
+        write_frame(&mut w, &C2S::Lock).unwrap();
+        write_frame(&mut w, &C2S::Ping(9)).unwrap();
+        loop {
+            if let S2C::Pong(9) = read_frame::<_, S2C>(&mut rd, &mut buf).unwrap() {
+                break;
+            }
+        }
+        assert_eq!(b.0.load(std::sync::atomic::Ordering::Relaxed), 1);
     }
 
     /// QueryEvents: EVENTS_PER_FRAME'lik parçalar + boş bitiş çerçevesi.

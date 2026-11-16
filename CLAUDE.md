@@ -173,8 +173,10 @@ Renderer seçimi (femtovg/skia/software) ölçümle karşılaştırılır.
 - Medya: `GlobalSystemMediaTransportControlsSessionManager` (SMTC): oturum, play/pause/next/prev, `MediaPropertiesChanged` / `PlaybackInfoChanged` olayları.
 - Fallback: SMTC oturumu yoksa medya tuşları `SendInput` ile `VK_MEDIA_*`.
 
-### Faz 5 — Tuş kilidi (karar bekliyor)
-Seçenekler: (a) PC'de kedi-kilit'e IPC ile sinyal, (b) ajan içinde low-level keyboard/mouse hook, (c) keystroke ile tetikleme. Protokole `C2S::Lock(LockCmd)` + `S2C::Lock(LockState)` **sona** eklenir. Başlamadan kullanıcıya kartla sorulur.
+### Faz 5 — Tuş kilidi ([ADR-0008](docs/kararlar/ADR-0008-tus-kilidi.md))
+- [x] Karar: (c) agent `SendInput(VK_PAUSE)` → cat-lock-cpp (yönetici) kısayolu. `C2S::Lock` sona eklendi, `cli l`. Normal yetkiden kilit + enjekte rakamla açma ölçüldü.
+- [ ] Telefon: kilit düğmesi.
+- [ ] Telefonda parmak izi / PIN → PC'de kilit açma + kilit durumu (yöntem o adımda kartla sorulur). Test kodu hiçbir dosyaya/commit'e yazılmaz.
 
 ## 7. Bağlam
 - Telefon şu an ses codec arızası nedeniyle açılmıyor; tamiri ayrı bir proje. Uygulama **ses donanımı gerektirmez** (ses API'si kullanılmaz).
