@@ -14,6 +14,14 @@ Eski **Xiaomi Mi Note 10 Lite** (toco, SD730G, AMOLED) telefonu aynı LAN'daki W
 | LowMonitor kaynak verisini telefonda gösterme | Sonra |
 | LowMonitor PC arayüzü (masaüstü; Canlı, Olaylar, Geçmiş, Süreçler), agent köprüsü | Var ([ADR-0003](docs/kararlar/ADR-0003-agent-lowmonitor-koprusu.md), [ADR-0005](docs/kararlar/ADR-0005-gecmis-sorgusu.md), [ADR-0006](docs/kararlar/ADR-0006-surecler-ve-sonlandirma.md), LM ADR-0029) |
 
+> **⚠ Taşınma (LM ADR-0031, 2026-11-16):** PC tarafı LowMonitor reposuna geçiyor. `tools/lowdeck-agent` → LM `crates/lowmon-deck` (tray içinde, tek süreç/ikon), `apps/lowdeck-desktop` → LM `lowmon-ui`, ayar `%APPDATA%\LowMonitor\deck.toml` (`agent.cfg`'den token/port/bind göçü → telefon ayarı değişmez).
+> **Bu repoda kalanlar:** `lowdeck-proto` (tek doğruluk kaynağı; LM bunu git `rev` ile kullanır), `lowdeck-client`, `apps/lowdeck-phone`, `tools/mock-server`, `cli`, Android CI/release.
+> **Kurallar (geçiş süresince):**
+> - Agent/masaüstü koduna yeni özellik **eklenmez**; PC tarafı işleri LM reposunda yapılır. Yalnız kritik hata düzeltmesi.
+> - Proto değişikliği (yeni C2S/S2C varyantı, `PROTO_VERSION`) burada yapılır, sonra LM'de `lowdeck-proto` rev'i güncellenir. Varyant yalnız sona eklenir.
+> - LM Faz 1–4 bitip kullanıcı "tamam" deyince **LowDeck Faz 5 (temizlik):** `tools/lowdeck-agent` + `apps/lowdeck-desktop` silinir, workspace üyeleri, `ci.yml` `windows` job'u ve `release.yml` `pc` job'u sadeleşir, README/CLAUDE.md/PROTOCOL.md "sunucu = LowMonitor tray" olarak güncellenir. APK değişmemeli.
+> - Telefon tarafı testleri: `mock-server` ya da LM tray (deck). Ayrıntı: TODO.md "ADR-0031 taşınma".
+
 **Öncelik: telefon tarafı.** PC tarafı ayrı, küçük bir exe: `tools/lowdeck-agent` (Rust, kullanıcı oturumu, ADR-0002). O hazır olana kadar `tools/mock-server` kullanılır.
 
 ## 2. Mimari kararlar (değiştirmeden önce kullanıcıya sor)

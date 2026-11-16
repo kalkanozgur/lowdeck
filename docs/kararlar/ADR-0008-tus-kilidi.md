@@ -1,6 +1,6 @@
 # ADR-0008: Tuş kilidi: cat-lock kısayolu (Pause) simülasyonu
 - Tarih: 2026-11-16
-- Durum: Kabul (yalnız kilitleme; telefon UI'ı ve uzaktan açma sonra)
+- Durum: Kabul (yalnız kilitleme; telefon UI'ı ve uzaktan açma sonra). **Taşınıyor:** LM ADR-0031 (2026-11-16) ile kod LowMonitor'a geçer; karar orada sürer
 
 ## Bağlam
 PC'de tuş kilidi zaten var: `cat-lock-cpp` (C++, ayrı repo). Kullanıcı oturumunda, Görev Zamanlayıcı ile **yönetici** (`RunLevel Highest`) çalışır; LL klavye/fare hook'u, overlay, LED. Kısayol `Pause` / `Ctrl+Alt+L` → kilit; açma yalnız klavyeden kod (sondan eşleşir). Agent normal yetkide.

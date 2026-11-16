@@ -1,6 +1,6 @@
 # ADR-0002: PC sunucusu ayrı `lowdeck-agent`, LowMonitor modülü değil
 - Tarih: 2026-11-14
-- Durum: Kabul (ADR-0001 ve CLAUDE.md §2'deki "Sunucu: LowMonitor içinde modül" kararının yerini alır)
+- Durum: Kabul (ADR-0001 ve CLAUDE.md §2'deki "Sunucu: LowMonitor içinde modül" kararının yerini alır). **Taşınıyor:** LM ADR-0031 (2026-11-16) ile kod LowMonitor'a geçer; karar orada sürer
 
 ## Bağlam
 LowMonitor reposu incelendi (`E:\Documents\Projects\lowmonitor`, M3 bitti):
