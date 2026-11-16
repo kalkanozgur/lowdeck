@@ -15,9 +15,13 @@
 - [ ] ADR-0004 Windows doğrulaması: zip kurulumu, agent kapalıyken "Arayüzü aç", `agent.cfg` yokken ilk açılış
 - [x] Masaüstü Geçmiş sekmesi + proto v4 `QueryHistory` (ADR-0005)
 - [x] Masaüstü Süreçler sekmesi + sonlandırma (ADR-0006)
-- [ ] Süreçler: Windows'ta tarama süresi/CPU, normal + yönetici süreci sonlandırma (UAC), PID reuse
-- [ ] Geçmiş: Windows'ta gerçek LM ile 1 sa / 24 sa / 7 g yanıt süresi (hedef < 2 s)
-- [ ] Masaüstü Canlı grafikleri: Windows'ta boşta CPU / private bytes / exe boyutu ölçümü
+- [x] Süreçler: Windows'ta tarama CPU (1,5 %/çekirdek), normal + yönetici (aynı kullanıcı) süreci sonlandırma
+- [ ] Süreçler: `kill_elevated` UAC yolu canlı doğrulanmadı (aynı kullanıcının yönetici süreci UAC'siz kapanıyor; yalnız başka kullanıcı/SYSTEM'de tetiklenir)
+- [x] Geçmiş: Windows'ta gerçek LM ile 1 sa / 24 sa / 7 g yanıt süresi (en kötü 143 ms)
+- [x] Masaüstü Canlı grafikleri: Windows'ta boşta CPU / private bytes (exe boyutu: kullanıcı kararıyla ölçülmüyor)
+- [ ] Masaüstü private ≈ 100 MiB (femtovg/OpenGL sürücüsü?); software renderer ile karşılaştır
+- [ ] Agent: LM pipe `All pipe instances are busy` (231) → olay/geçmiş sorgusunda kısa yeniden deneme
+- [ ] Telefondan "PC'yi bul" + firewall (UDP 47811 / TCP 47810) gerçek Wi-Fi'da
 - [ ] `lowmon-proto` rev'i LowMonitor sürümleriyle birlikte güncelle (pipe `PROTO` artarsa agent `servis: BadHello` loglar)
 
 ## Fikirler
