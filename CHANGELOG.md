@@ -2,6 +2,8 @@
 Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve commit).
 
 ## [Unreleased]
+### Kaldırıldı
+- PC tarafı (`lowdeck-agent`, `lowdeck-desktop`) LowMonitor'a taşındı (LM ADR-0031): sunucu LowMonitor tray'de, arayüz `lowmon-ui`. Release artık yalnız APK; telefon ayarı (token/port) değişmez.
 ### Değişti
 - Lisans: GPL-3.0-only → MIT OR Apache-2.0 (LowMonitor ile aynı; tek sahip). Slint Royalty-free 2.0 ile kullanılır, README'de atıf rozeti.
 ### Düzeltildi

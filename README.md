@@ -12,9 +12,7 @@ Eski Xiaomi Mi Note 10 Lite'ı aynı LAN'daki Windows PC için minimum tüketiml
 crates/lowdeck-proto     protokol tipleri + çerçeveleme
 crates/lowdeck-client    UI'dan bağımsız istemci
 apps/lowdeck-phone       Slint uygulaması (Android + masaüstü)
-apps/lowdeck-desktop     LowMonitor PC arayüzü (Canlı, Olaylar, Geçmiş, Süreçler; agent loopback)
 tools/mock-server        sahte PC sunucusu
-tools/lowdeck-agent      gerçek PC sunucusu (Windows: Core Audio + SMTC)
 docs/                    PROTOCOL, gereksinimler, devlog, kararlar
 .github/                 CI (APK artifact) + release
 ```
@@ -23,22 +21,14 @@ docs/                    PROTOCOL, gereksinimler, devlog, kararlar
 ```powershell
 cargo run -p mock-server -- 47810 dev
 cargo run -p lowdeck-phone --bin lowdeck-phone-dev   # ⚙ → 127.0.0.1 / 47810 / dev
-cargo run -p lowdeck-desktop                          # agent.cfg'den; mock için: -- 47810 dev
-
-# Gerçek PC sunucusu (mock yerine), tray'de çalışır: sağ tık → telefon ayarı / Windows ile başlat
-# ayar %APPDATA%\LowDeck\agent.cfg (ilk açılışta LAN IP + rastgele token ile oluşur)
-cargo run --release -p lowdeck-agent
+cargo run -p lowdeck-client --example cli -- 127.0.0.1 47810 dev   # UI'sız istemci
 ```
 APK GitHub Actions'ta derlenir (bkz. `CLAUDE.md` Faz 0).
 
-## PC kurulumu (ADR-0004)
-1. Release sayfasından `lowdeck-pc-vX.Y.Z.zip`'i indir, içindeki iki exe'yi `%LOCALAPPDATA%\LowDeck\`'e aç (**ikisi aynı klasörde**).
-2. `lowdeck-agent.exe`'yi bir kez çalıştır → tray ikonu → **Windows ile başlat**. Agent `agent.cfg`'yi oluşturur ve `HKCU\Software\LowMonitor\UiExe`'yi yazar.
-3. PC arayüzü: LowMonitor tray → **Arayüzü aç**. Agent kapalıysa masaüstü onu kendisi başlatır.
-4. Telefon: ⚙ → **PC'yi bul** (aynı Wi-Fi) → listeden seç; token agent tray menüsünün ilk satırında (host / port elle de girilebilir).
-5. Telefon PC'yi bulamıyor ya da bağlanamıyorsa: agent tray → **Firewall kuralı ekle (yönetici)…** (UAC; Private profil + yerel alt ağ, bu exe; TCP port + UDP 47811 keşif). Port değişirse tekrar çalıştır.
-
-Agent log'u: `%APPDATA%\LowDeck\agent.log` (1 MiB'ta `agent.log.1`'e döner); tray → **Log'u aç**.
+## PC tarafı (LowMonitor)
+Gerçek PC sunucusu ve PC arayüzü LowMonitor reposunda (LM ADR-0031): sunucu `lowmon-tray` içinde (`lowmon-deck`), arayüz `lowmon-ui`. Kurulum LowMonitor `scripts\install.ps1`.
+- Telefon ayarı (host · port · token): LowMonitor tray → **Telefon ▸** ilk satır; ayar `%APPDATA%\LowMonitor\deck.toml` (eski `agent.cfg`'den taşınır, telefon ayarı değişmez).
+- Telefon: ⚙ → **PC'yi bul** (aynı Wi-Fi) → listeden seç. Bulamıyorsa: tray → Telefon ▸ **Firewall kuralı ekle** (TCP port + UDP 47811 keşif).
 
 ## Lisans
 MIT ya da Apache-2.0, seçim sizin ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).

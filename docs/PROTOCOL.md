@@ -5,7 +5,7 @@ Kaynak: `crates/lowdeck-proto/src/lib.rs`. Bu doküman ile kod çelişirse **kod
 ## 1. Taşıma
 | Alan | Değer |
 |---|---|
-| Transport | TCP, istemci (telefon) → sunucu (`lowdeck-agent`, PC kullanıcı oturumu; ADR-0002) |
+| Transport | TCP, istemci (telefon) → sunucu (LowMonitor tray içindeki `lowmon-deck`, PC kullanıcı oturumu; LM ADR-0031, önceden `lowdeck-agent`) |
 | Port | 47810 (varsayılan; 47800 LowMonitor `lowmon-net`'e ait) |
 | Bind | PC'nin LAN IP'si (config) + `127.0.0.1` aynı port (PC arayüzü, ADR-0003); `0.0.0.0` değil; firewall: yalnız Private profil + yerel alt ağ |
 | Bağlantı | Dinleyici başına tek, kalıcı (LAN yuvası + loopback yuvası, birbirini düşürmez); `TCP_NODELAY` açık; token ikisinde de zorunlu |

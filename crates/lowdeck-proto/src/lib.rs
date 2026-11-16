@@ -1,6 +1,6 @@
 //! LowDeck kablo protokolü.
 //!
-//! - Taşıma: TCP, tek kalıcı bağlantı (istemci = telefon, sunucu = lowdeck-agent / mock-server).
+//! - Taşıma: TCP, tek kalıcı bağlantı (istemci = telefon, sunucu = LowMonitor tray (`lowmon-deck`) / mock-server).
 //! - Çerçeve: `[u16 LE uzunluk][postcard payload]`, payload <= `MAX_FRAME`.
 //! - Telefon, agent ve mock aynı crate'i kullanır; tipler tek kaynaktan gelir.
 //!

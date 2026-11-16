@@ -1,6 +1,6 @@
 # ADR-0006: Süreçler sekmesi: masaüstü kendisi tarar, yükseltme için kendini runas ile çalıştırır
 - Tarih: 2026-11-15
-- Durum: Kabul (LM spek §9.4 ve §10'dan sapma: veri kaynağı ve `lowmon-elev` yerine kendi kopyası). **Taşınıyor:** LM ADR-0031 (2026-11-16) ile kod LowMonitor'a geçer; karar orada sürer
+- Durum: Kabul (LM spek §9.4 ve §10'dan sapma: veri kaynağı ve `lowmon-elev` yerine kendi kopyası). **Taşındı:** LM ADR-0031 (2026-11-16); kod LowMonitor `lowmon-deck` (tray) + `lowmon-ui`, bu repodan silindi (LowDeck Faz 5). Karar orada sürer
 
 ## Bağlam
 LM spek §9.4 "Süreçler: Top-N tablosu + müdahale (`lowmon-elev`, §10)". Bugün:

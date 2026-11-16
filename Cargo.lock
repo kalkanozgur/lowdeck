@@ -2638,31 +2638,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
-name = "lowdeck-agent"
-version = "0.1.0"
-dependencies = [
- "lowdeck-proto",
- "lowmon-proto",
- "windows",
- "windows-core",
-]
-
-[[package]]
 name = "lowdeck-client"
 version = "0.1.0"
 dependencies = [
  "lowdeck-proto",
-]
-
-[[package]]
-name = "lowdeck-desktop"
-version = "0.1.0"
-dependencies = [
- "lowdeck-client",
- "lowdeck-proto",
- "slint",
- "slint-build",
- "windows",
 ]
 
 [[package]]
@@ -2678,15 +2657,6 @@ dependencies = [
 [[package]]
 name = "lowdeck-proto"
 version = "0.1.0"
-dependencies = [
- "postcard",
- "serde",
-]
-
-[[package]]
-name = "lowmon-proto"
-version = "0.1.0"
-source = "git+https://github.com/kalkanozgur/lowmonitor?rev=3241c3a#3241c3aa347396cf918e70f677b30e9f37d48d62"
 dependencies = [
  "postcard",
  "serde",
@@ -4180,7 +4150,6 @@ dependencies = [
  "i-slint-backend-android-activity",
  "i-slint-backend-linuxkms",
  "i-slint-backend-selector",
- "i-slint-backend-winit",
  "i-slint-common",
  "i-slint-core",
  "i-slint-core-macros",
