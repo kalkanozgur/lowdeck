@@ -35,7 +35,7 @@ Eski **Xiaomi Mi Note 10 Lite** (toco, SD730G, AMOLED) telefonu aynı LAN'daki W
 | Kimlik doğrulama | Hello içinde paylaşılan token; sonra LowMonitor §16.2 tarzı eşleştirme | Sadece LAN; TLS gereksiz yük. Bind LAN IP + Private firewall |
 | Sunucu | Ayrı `lowdeck-agent`, kullanıcı oturumu, TCP 47810 ([ADR-0002](docs/kararlar/ADR-0002-lowdeck-agent.md)) | Core Audio/SMTC session 0'da çalışmaz; LowMonitor servisi ağa kapalı, `lowmon-net` salt-okuma + WS/JSON + M6 |
 
-Lisans notu: Slint, GPL-3 ya da royalty-free lisansla kullanılıyor (masaüstü/mobil kişisel proje için uygun). Kapalı kaynak dağıtılacaksa lisans koşulları yeniden gözden geçirilir.
+Lisans: proje MIT OR Apache-2.0 (2026-11-16, önceden GPL-3.0-only; LowMonitor ile aynı, LM ADR-0031). Slint, Royalty-free 2.0 lisansıyla kullanılır: masaüstü/mobil uygun, gömülü değil; şart = README'deki "Made with Slint" rozeti (binary'lerin indirildiği sayfa). Rozet kaldırılmaz.
 
 ## 3. Klasör yapısı
 ```
