@@ -477,7 +477,7 @@ export component MainWindow inherits Window {
                     }
                     Stat { label: "RAM  5 min"; value: root.lm-ram; live: root.lm-live; path-a: root.lm-ram-path; }
                     Stat {
-                        label: "DISK  B/s" + (root.lm-disk-c != "" ? "  · " + root.lm-disk-c : "");
+                        label: "DISK  R / W" + (root.lm-disk-c != "" ? "  · " + root.lm-disk-c : "");
                         value: root.lm-disk;
                         live: root.lm-live;
                         path-a: root.lm-disk-r-path;
@@ -485,7 +485,7 @@ export component MainWindow inherits Window {
                         scale: root.lm-disk-scale;
                     }
                     Stat {
-                        label: "NET  B/s";
+                        label: "NET  ↓ / ↑";
                         value: root.lm-net;
                         live: root.lm-live;
                         path-a: root.lm-net-rx-path;

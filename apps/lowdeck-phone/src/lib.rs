@@ -515,8 +515,8 @@ fn show_metrics(ui: &MainWindow, m: &Metrics) {
     ui.set_lm_state(1);
     ui.set_lm_cpu(format!("{:.0}%", m.cpu as f32 / 100.0).into());
     ui.set_lm_ram(format!("{:.1} / {:.0} GB", m.ram_used_mb as f32 / 1024.0, m.ram_total_mb as f32 / 1024.0).into());
-    ui.set_lm_disk(format!("R {}  W {}", rate(m.disk_r_kbps), rate(m.disk_w_kbps)).into());
-    ui.set_lm_net(format!("↓ {}  ↑ {}", rate(m.net_rx_kbps), rate(m.net_tx_kbps)).into());
+    ui.set_lm_disk(format!("{} / {}", rate(m.disk_r_kbps), rate(m.disk_w_kbps)).into());
+    ui.set_lm_net(format!("{} / {}", rate(m.net_rx_kbps), rate(m.net_tx_kbps)).into());
     let cores = m.cores.iter().map(|&c| c as f32 / 200.0).collect();
     set_vec(ui.get_lm_cores(), cores, |v| ui.set_lm_cores(v));
     HQ.with_borrow_mut(|h| h.ram_total_mb = m.ram_total_mb);
