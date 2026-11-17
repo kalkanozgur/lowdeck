@@ -74,14 +74,20 @@ fn handle(stream: TcpStream, token: &str) -> Result<(), FrameError> {
     }
 
     let mut tick: u32 = 0;
+    let (mut metrics, mut sensors) = (false, false);
     loop {
         // shortcut: zaman aşımı çerçeve ortasına denk gelirse akış bozulur; localhost'ta çerçeve tek parça gelir.
         let msg: C2S = match read_frame(&mut rd, &mut buf) {
             Err(FrameError::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
                 tick = tick.wrapping_add(1);
-                write_frame(&mut wr, &S2C::Metrics(Some(fake_metrics(tick))))?;
-                if tick % 3 == 1 {
-                    write_frame(&mut wr, &S2C::Top(fake_top(tick)))?;
+                if metrics {
+                    write_frame(&mut wr, &S2C::Metrics(Some(fake_metrics(tick))))?;
+                    if tick % 3 == 1 {
+                        write_frame(&mut wr, &S2C::Top(fake_top(tick)))?;
+                    }
+                }
+                if sensors {
+                    write_frame(&mut wr, &S2C::Sensors(fake_sensors(tick)))?;
                 }
                 continue;
             }
@@ -110,9 +116,13 @@ fn handle(stream: TcpStream, token: &str) -> Result<(), FrameError> {
                 write_frame(&mut wr, &S2C::Media(media.clone()))?;
             }
             C2S::Subscribe(t) => {
-                let on = t & TOPIC_METRICS != 0;
-                rd.get_ref().set_read_timeout(on.then_some(METRICS_EVERY)).ok();
-                if on {
+                metrics = t & TOPIC_METRICS != 0;
+                sensors = t & TOPIC_SENSORS != 0;
+                rd.get_ref().set_read_timeout((metrics || sensors).then_some(METRICS_EVERY)).ok();
+                if sensors {
+                    write_frame(&mut wr, &S2C::Sensors(fake_sensors(0)))?;
+                }
+                if metrics {
                     tick = 0;
                     write_frame(&mut wr, &S2C::Metrics(Some(fake_metrics(0))))?;
                     write_frame(&mut wr, &S2C::Top(fake_top(0)))?;
@@ -169,6 +179,15 @@ fn discovery(port: u16) {
 fn wave(t: u32, period: u32, max: u32) -> u32 {
     let p = t % period;
     max * if p < period / 2 { p } else { period - p } / (period / 2)
+}
+
+fn fake_sensors(t: u32) -> Sensors {
+    Sensors {
+        gpu_pct: Some(wave(t, 8, 90) as u8),
+        gpu_c: Some(40 + wave(t, 15, 30) as i16),
+        cpu_c: Some(50 + wave(t + 3, 12, 35) as i16),
+        disk_c: Some(38),
+    }
 }
 
 fn fake_metrics(t: u32) -> Metrics {

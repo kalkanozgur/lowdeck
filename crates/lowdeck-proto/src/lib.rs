@@ -13,6 +13,7 @@ use std::io::{self, Read, Write};
 /// v2: `Subscribe` / `Metrics` / `Top`. v3: olaylar (`TOPIC_EVENTS`, `Alarms`, `Event`, `QueryEvents`; ADR-0003).
 /// v4: metrik geçmişi (`QueryHistory`, `History`; ADR-0005).
 /// v4 ek: `TOPIC_AI` + `S2C::Ai` (LM ADR-0032). Yalnız abone olana gider → eski istemci etkilenmez, sürüm aynı.
+/// v4 ek: `TOPIC_SENSORS` + `S2C::Sensors` (LM ADR-0033): aynı kural.
 pub const PROTO_VERSION: u16 = 4;
 pub const DEFAULT_PORT: u16 = 47810;
 pub const MAX_FRAME: usize = 4096;
@@ -46,6 +47,8 @@ pub const TOPIC_METRICS: Topics = 1;
 pub const TOPIC_EVENTS: Topics = 2;
 /// LowMonitor AI (Claude) kullanımı: abonelikte son durum, sonra her değişiklik `S2C::Ai` (LM ADR-0032).
 pub const TOPIC_AI: Topics = 4;
+/// LowMonitor tray sensörleri (GPU %, CPU/GPU/disk °C; LM ADR-0033): abonelikte son okuma, sonra ~2 s'de bir `S2C::Sensors`.
+pub const TOPIC_SENSORS: Topics = 8;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum AudioCmd {
@@ -89,6 +92,21 @@ pub enum S2C {
     History { from_ms: u64, step_ms: u64, points: Vec<Option<HistPoint>> },
     /// `TOPIC_AI`: Claude abonelik kullanımı. `None` = PC'de veri yok (hiç sorgulanmadı).
     Ai(Option<AiUsage>),
+    /// `TOPIC_SENSORS`: tray sensör okuması (~2 s). Ek varyant: yalnız abone olana gider.
+    Sensors(Sensors),
+}
+
+/// LowMonitor tray sensörleri (`lowmon-sensors`). `None` = kaynak yok / okunamadı.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Sensors {
+    /// GPU 3D kullanımı, % (0..=100).
+    pub gpu_pct: Option<u8>,
+    /// °C.
+    pub gpu_c: Option<i16>,
+    /// ACPI termal bölge (çip değil, kaba), °C.
+    pub cpu_c: Option<i16>,
+    /// Disklerin en sıcağı, °C.
+    pub disk_c: Option<i16>,
 }
 
 /// `AiUsage::source` / `error` bu uzunlukta kırpılır (sunucu) → `MAX_FRAME` aşılmaz.
@@ -406,6 +424,17 @@ mod tests {
         let mut wire = Vec::new();
         write_frame(&mut wire, &msg).unwrap();
         assert!(wire.len() <= 640, "ai {} bayt", wire.len());
+        let mut buf = [0u8; MAX_FRAME];
+        assert_eq!(read_frame::<_, S2C>(&mut &wire[..], &mut buf).unwrap(), msg);
+    }
+
+    /// Sensör çerçevesi küçük kalır, gidiş-dönüş aynı; `None` alanlar korunur.
+    #[test]
+    fn sensors_roundtrip() {
+        let msg = S2C::Sensors(Sensors { gpu_pct: Some(100), gpu_c: Some(-40), cpu_c: None, disk_c: Some(i16::MAX) });
+        let mut wire = Vec::new();
+        write_frame(&mut wire, &msg).unwrap();
+        assert!(wire.len() <= 16, "sensors {} bayt", wire.len());
         let mut buf = [0u8; MAX_FRAME];
         assert_eq!(read_frame::<_, S2C>(&mut &wire[..], &mut buf).unwrap(), msg);
     }
