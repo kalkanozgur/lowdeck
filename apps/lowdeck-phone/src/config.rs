@@ -39,17 +39,17 @@ pub fn parse(host: &str, port: &str, token: &str) -> Result<AppConfig, &'static 
     let host = host.trim();
     // IPv4, DNS adı ya da IPv6 (köşeli parantezsiz). Boşluk/satır sonu dosyayı bozar.
     if host.is_empty() {
-        return Err("PC adresi boş");
+        return Err("PC address is empty");
     }
     if host.len() > 253 || !host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':')) {
-        return Err("PC adresi geçersiz (yalnız harf, rakam, . - :)");
+        return Err("Invalid PC address (letters, digits, . - : only)");
     }
     let port = match port.trim().parse::<u16>() {
         Ok(p) if p != 0 => p,
-        _ => return Err("Port 1–65535 arasında olmalı"),
+        _ => return Err("Port must be 1–65535"),
     };
     if token.is_empty() || token.contains(['\n', '\r']) {
-        return Err("Token boş ya da satır sonu içeriyor");
+        return Err("Token is empty or contains a line break");
     }
     Ok(AppConfig { host: host.to_string(), port, token: token.to_string() })
 }

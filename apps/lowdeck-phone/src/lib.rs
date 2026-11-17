@@ -133,7 +133,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
             let my_gen = generation.fetch_add(1, Ordering::Relaxed) + 1;
             let Some(ui) = weak.upgrade() else { return };
             if c.host.is_empty() {
-                ui.set_status("PC adresi ayarlanmadı".into());
+                ui.set_status("PC address not set".into());
                 ui.set_settings_open(true);
                 return;
             }
@@ -235,9 +235,9 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                     h.pending += 1;
                     h.pts.clear();
                 });
-                ui.set_hist_status("Yükleniyor…".into());
+                ui.set_hist_status("Loading…".into());
             } else {
-                ui.set_hist_status("PC'ye bağlı değil".into());
+                ui.set_hist_status("Not connected to PC".into());
             }
         });
     }
@@ -269,7 +269,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                     generation.fetch_add(1, Ordering::Relaxed);
                     if let Some(ui) = weak.upgrade() {
                         ui.set_connected(false);
-                        ui.set_status("Duraklatıldı".into());
+                        ui.set_status("Paused".into());
                     }
                 }
             }))
@@ -375,7 +375,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
         let weak = ui.as_weak();
         ui.on_discover(move || {
             let Some(ui) = weak.upgrade() else { return };
-            ui.set_discover_status("Aranıyor…".into());
+            ui.set_discover_status("Searching…".into());
             set_vec(ui.get_found(), Vec::new(), |v| ui.set_found(v));
             let weak = weak.clone();
             std::thread::spawn(move || {
@@ -389,7 +389,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                                 b.name,
                                 b.host,
                                 b.port,
-                                if b.proto != PROTO_VERSION { "  (sürüm farklı)" } else { "" }
+                                if b.proto != PROTO_VERSION { "  (version differs)" } else { "" }
                             )
                             .into(),
                             host: b.host.as_str().into(),
@@ -397,8 +397,8 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                         })
                         .collect();
                     ui.set_discover_status(match rows.len() {
-                        0 => "Bulunamadı: aynı Wi-Fi'da mı, agent açık mı, firewall kuralı var mı?".into(),
-                        n => format!("{n} PC bulundu, seç; token agent tray menüsünde").into(),
+                        0 => "Not found: same Wi-Fi? LowMonitor tray running? firewall rule?".into(),
+                        n => format!("{n} PC found, pick one; token is in the tray menu").into(),
                     });
                     set_vec(ui.get_found(), rows, |v| ui.set_found(v));
                 });
@@ -418,16 +418,16 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
     match ev {
         Event::Connecting => {
             ui.set_connected(false);
-            ui.set_status("Bağlanıyor…".into());
+            ui.set_status("Connecting…".into());
         }
         Event::Connected { server } => {
             ui.set_connected(true);
-            ui.set_status(format!("Bağlı: {server}").into());
+            ui.set_status(format!("Connected: {server}").into());
             QUERY_EVENTS.with(|q| q.borrow().as_ref().map(|f| f()));
         }
         Event::Disconnected { reason } => {
             ui.set_connected(false);
-            ui.set_status(format!("Koptu: {reason}").into());
+            ui.set_status(format!("Disconnected: {reason}").into());
             ui.set_lm_state(0);
             ui.set_ai_state(0);
             ui.set_alarms("".into());
@@ -619,7 +619,7 @@ fn draw_history(ui: &MainWindow) {
             format!("{} – {}", events::fmt_time(h.from_ms, off), events::fmt_time(to_ms, off)).into(),
         );
         let empty = pts.iter().all(Option::is_none);
-        ui.set_hist_status(if empty { "Veri yok (LowMonitor servisi?)" } else { "" }.into());
+        ui.set_hist_status(if empty { "No data (LowMonitor service?)" } else { "" }.into());
     });
 }
 
@@ -662,20 +662,20 @@ fn show_ai(ui: &MainWindow, a: Option<&AiUsage>, now: u64) {
     ui.set_ai_state(1);
     // 3 = soluk (eski veri), aksi halde PC'nin seviyesi
     let level = |w: &Option<AiWindow>| if a.stale { 3 } else { w.map_or(0, |w| w.level.min(2) as i32) };
-    ui.set_ai_session(ai_line("Oturum", &a.session, now).into());
-    ui.set_ai_week(ai_line("Hafta", &a.week, now).into());
+    ui.set_ai_session(ai_line("Session", &a.session, now).into());
+    ui.set_ai_week(ai_line("Week", &a.week, now).into());
     ui.set_ai_session_level(level(&a.session));
     ui.set_ai_week_level(level(&a.week));
     ui.set_ai_note(ai_note(a, now).into());
 }
 
-/// "Oturum %33 · 4s16dk" (LM taskbar ile aynı biçim).
+/// "Session 33% · 4h16m" (LM taskbar ile aynı biçim).
 fn ai_line(label: &str, w: &Option<AiWindow>, now: u64) -> String {
     match w {
         None => format!("{label} —"),
         Some(w) => {
             let left = if w.resets_at == 0 { "—".into() } else { remaining(w.resets_at as i64 - now as i64) };
-            format!("{label} %{} · {left}", (w.pct + 5) / 10)
+            format!("{label} {}% · {left}", (w.pct + 5) / 10)
         }
     }
 }
@@ -685,22 +685,22 @@ fn ai_note(a: &AiUsage, now: u64) -> String {
     if !a.error.is_empty() {
         a.error.clone()
     } else if a.stale {
-        format!("eski · {} dk önce", now.saturating_sub(a.fetched_at) / 60)
+        format!("stale · {} min ago", now.saturating_sub(a.fetched_at) / 60)
     } else {
         a.source.clone()
     }
 }
 
-/// Geri sayım: "2g05s", "3s07dk", "12dk"; negatif → 0.
+/// Geri sayım: "2d05h", "3s07dk", "12dk"; negatif → 0.
 fn remaining(secs: i64) -> String {
     let s = secs.max(0);
     let (d, h, m) = (s / 86_400, s % 86_400 / 3600, s % 3600 / 60);
     if d > 0 {
-        format!("{d}g{h:02}s")
+        format!("{d}d{h:02}h")
     } else if h > 0 {
-        format!("{h}s{m:02}dk")
+        format!("{h}h{m:02}m")
     } else {
-        format!("{m}dk")
+        format!("{m}m")
     }
 }
 
@@ -736,16 +736,16 @@ mod tests {
     #[test]
     fn ai_text() {
         let w = Some(AiWindow { pct: 334, resets_at: 1_000 + 4 * 3600 + 16 * 60, level: 1 });
-        assert_eq!(ai_line("Oturum", &w, 1_000), "Oturum %33 · 4s16dk");
-        assert_eq!(ai_line("Hafta", &None, 0), "Hafta —");
+        assert_eq!(ai_line("Session", &w, 1_000), "Session 33% · 4h16m");
+        assert_eq!(ai_line("Week", &None, 0), "Week —");
         let w = Some(AiWindow { pct: 1000, resets_at: 0, level: 2 });
-        assert_eq!(ai_line("Hafta", &w, 0), "Hafta %100 · —");
-        assert_eq!(remaining(2 * 86_400 + 5 * 3600), "2g05s");
-        assert_eq!(remaining(-5), "0dk");
+        assert_eq!(ai_line("Week", &w, 0), "Week 100% · —");
+        assert_eq!(remaining(2 * 86_400 + 5 * 3600), "2d05h");
+        assert_eq!(remaining(-5), "0m");
         let mut a = AiUsage { fetched_at: 100, source: "OAuth".into(), ..Default::default() };
         assert_eq!(ai_note(&a, 200), "OAuth");
         a.stale = true;
-        assert_eq!(ai_note(&a, 100 + 720), "eski · 12 dk önce");
+        assert_eq!(ai_note(&a, 100 + 720), "stale · 12 min ago");
         a.error = "OAuth: token süresi dolmuş".into();
         assert_eq!(ai_note(&a, 0), "OAuth: token süresi dolmuş");
     }

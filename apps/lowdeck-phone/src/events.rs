@@ -1,32 +1,32 @@
-//! Olay satırı biçimi ve yerel saat. LowMonitor `lowmon-ui/src/main.rs` ile aynı metinler (yalnız Türkçe).
+//! Olay satırı biçimi ve yerel saat. LowMonitor `lowmon-ui/src/main.rs` ile aynı metinler (İngilizce; kullanıcı kararı 2026-11-18).
 
 use lowdeck_proto::EventItem;
 
 /// Olay açıklaması. Sistem adları LM `lowmon-svc` ile aynı.
 pub fn desc(e: &EventItem) -> String {
     let s = match (e.kind, e.name.as_str()) {
-        (2, "service_start") => "Servis başladı",
-        (2, "config_invalid") => "config.toml hatalı; varsayılan ayarlar kullanılıyor",
-        (2, "pipe_unavailable") => "Pipe açılamadı; tray ve arayüz servise bağlanamaz",
-        (2, "integrity") => "Kayıt dosyasında bozuk bölüm bulundu, atlandı (önceki kapanış temiz değil)",
-        (2, "retention_ok") => return format!("Eski kayıtlar temizlendi ({})", e.value),
-        (2, "retention_error") => "Eski kayıtlar temizlenemedi",
-        (2, "control_pause") => "Kayıt duraklatıldı",
-        (2, "control_resume") => "Kayıt sürdürüldü",
-        (2, "control_reload") if e.value != 0 => "Ayarlar yeniden yüklendi",
-        (2, "control_reload") => "Ayarlar yeniden yüklenemedi (config.toml hatalı)",
-        (2, "write_error") => "Kayıt dosyasına yazılamadı",
+        (2, "service_start") => "Service started",
+        (2, "config_invalid") => "config.toml invalid; using defaults",
+        (2, "pipe_unavailable") => "Pipe unavailable; tray and UI cannot connect",
+        (2, "integrity") => "Corrupt log section found and skipped (unclean shutdown)",
+        (2, "retention_ok") => return format!("Old logs pruned ({})", e.value),
+        (2, "retention_error") => "Pruning old logs failed",
+        (2, "control_pause") => "Recording paused",
+        (2, "control_resume") => "Recording resumed",
+        (2, "control_reload") if e.value != 0 => "Settings reloaded",
+        (2, "control_reload") => "Settings reload failed (config.toml invalid)",
+        (2, "write_error") => "Log write failed",
         (2, _) => "",
         (k, name) => {
             // shortcut: metrik kural adından tahmin (LM ile aynı); alarm tanımı proto'ya gelirse oradan
             let what = match name.split(['_', '.']).next().unwrap_or("") {
-                "cpu" => "CPU kullanımı",
-                "ram" | "mem" => "Bellek kullanımı",
+                "cpu" => "CPU usage",
+                "ram" | "mem" => "Memory usage",
                 "disk" => "Disk",
-                "net" => "Ağ",
-                _ => "Ölçüm",
+                "net" => "Network",
+                _ => "Metric",
             };
-            return format!("{what} {}", if k == 0 { "eşiği aştı" } else { "normale döndü" });
+            return format!("{what} {}", if k == 0 { "crossed threshold" } else { "back to normal" });
         }
     };
     s.into()
@@ -84,8 +84,8 @@ mod tests {
         let e = |kind, name: &str, value| EventItem { ts_ms: 0, kind, name: name.into(), value };
         assert_eq!(value(&e(0, "cpu_high", 5920)), "59.2%");
         assert_eq!(value(&e(2, "service_start", 1)), "");
-        assert_eq!(desc(&e(0, "cpu_high", 0)), "CPU kullanımı eşiği aştı");
-        assert_eq!(desc(&e(1, "ram_high", 0)), "Bellek kullanımı normale döndü");
-        assert_eq!(desc(&e(2, "service_start", 0)), "Servis başladı");
+        assert_eq!(desc(&e(0, "cpu_high", 0)), "CPU usage crossed threshold");
+        assert_eq!(desc(&e(1, "ram_high", 0)), "Memory usage back to normal");
+        assert_eq!(desc(&e(2, "service_start", 0)), "Service started");
     }
 }
