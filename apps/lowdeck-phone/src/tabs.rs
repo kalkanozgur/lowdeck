@@ -58,8 +58,10 @@ pub fn sub(r: &AiReport) -> String {
 
 pub fn groups(r: &AiReport) -> Vec<AiGroupRow> {
     let top = r.groups.first().map_or(1, |g| g.tokens.max(1)) as f32;
+    // Yatay ekranda grafiğin altına 6 satır sığar (sunucu en çok 8 gönderir)
     r.groups
         .iter()
+        .take(6)
         .map(|g| AiGroupRow {
             name: g.name.as_str().into(),
             pct: permille(g.share).into(),
