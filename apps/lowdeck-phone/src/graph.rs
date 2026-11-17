@@ -35,11 +35,7 @@ pub struct History {
 
 impl Default for History {
     fn default() -> Self {
-        Self {
-            buf: [Sample::default(); CAP],
-            head: 0,
-            len: 0,
-        }
+        Self { buf: [Sample::default(); CAP], head: 0, len: 0 }
     }
 }
 
@@ -61,8 +57,7 @@ impl History {
     }
 
     fn recent(&self, now_s: u64) -> impl Iterator<Item = &Sample> {
-        self.iter()
-            .filter(move |s| now_s.saturating_sub(s.ts_s) <= WINDOW_S)
+        self.iter().filter(move |s| now_s.saturating_sub(s.ts_s) <= WINDOW_S)
     }
 
     /// Penceredeki en büyük değer (oto-ölçek için).
@@ -135,11 +130,7 @@ mod tests {
     use super::*;
 
     fn s(ts_s: u64, cpu: u16) -> Sample {
-        Sample {
-            ts_s,
-            cpu,
-            ..Default::default()
-        }
+        Sample { ts_s, cpu, ..Default::default() }
     }
 
     fn cpu(s: &Sample) -> Option<f32> {
@@ -179,10 +170,7 @@ mod tests {
     #[test]
     fn series_and_scale() {
         let mut out = String::new();
-        series_path(
-            [Some(0.5), Some(1.0), None, Some(0.0), None].into_iter(),
-            &mut out,
-        );
+        series_path([Some(0.5), Some(1.0), None, Some(0.0), None].into_iter(), &mut out);
         assert_eq!(out, "M0 50.0L1 0.0M3 100.0h1");
         assert_eq!(nice_scale(0), 1024);
         assert_eq!(nice_scale(1500), 2048);
