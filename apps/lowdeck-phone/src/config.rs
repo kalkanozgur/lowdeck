@@ -12,7 +12,11 @@ pub struct AppConfig {
 
 impl Default for AppConfig {
     fn default() -> Self {
-        Self { host: String::new(), port: DEFAULT_PORT, token: "dev".into() }
+        Self {
+            host: String::new(),
+            port: DEFAULT_PORT,
+            token: "dev".into(),
+        }
     }
 }
 
@@ -22,7 +26,9 @@ pub fn load(path: Option<&Path>) -> AppConfig {
         return c;
     };
     for line in text.lines() {
-        let Some((k, v)) = line.split_once('=') else { continue };
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
         let v = v.trim();
         match k.trim() {
             "host" => c.host = v.to_string(),
@@ -41,7 +47,11 @@ pub fn parse(host: &str, port: &str, token: &str) -> Result<AppConfig, &'static 
     if host.is_empty() {
         return Err("PC address is empty");
     }
-    if host.len() > 253 || !host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':')) {
+    if host.len() > 253
+        || !host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'))
+    {
         return Err("Invalid PC address (letters, digits, . - : only)");
     }
     let port = match port.trim().parse::<u16>() {
@@ -51,7 +61,11 @@ pub fn parse(host: &str, port: &str, token: &str) -> Result<AppConfig, &'static 
     if token.is_empty() || token.contains(['\n', '\r']) {
         return Err("Token is empty or contains a line break");
     }
-    Ok(AppConfig { host: host.to_string(), port, token: token.to_string() })
+    Ok(AppConfig {
+        host: host.to_string(),
+        port,
+        token: token.to_string(),
+    })
 }
 
 pub fn save(path: Option<&Path>, c: &AppConfig) {
@@ -59,7 +73,10 @@ pub fn save(path: Option<&Path>, c: &AppConfig) {
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let _ = std::fs::write(p, format!("host={}\nport={}\ntoken={}\n", c.host, c.port, c.token));
+        let _ = std::fs::write(
+            p,
+            format!("host={}\nport={}\ntoken={}\n", c.host, c.port, c.token),
+        );
     }
 }
 
@@ -70,7 +87,10 @@ mod tests {
     #[test]
     fn valid() {
         let c = parse(" 192.168.1.20 ", "47810", "a=b").unwrap();
-        assert_eq!((c.host.as_str(), c.port, c.token.as_str()), ("192.168.1.20", 47810, "a=b"));
+        assert_eq!(
+            (c.host.as_str(), c.port, c.token.as_str()),
+            ("192.168.1.20", 47810, "a=b")
+        );
         assert!(parse("pc-salon.local", "1", "t").is_ok());
         assert!(parse("fe80::1", "65535", "t").is_ok());
     }

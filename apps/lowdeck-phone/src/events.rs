@@ -26,7 +26,14 @@ pub fn desc(e: &EventItem) -> String {
                 "net" => "Network",
                 _ => "Metric",
             };
-            return format!("{what} {}", if k == 0 { "crossed threshold" } else { "back to normal" });
+            return format!(
+                "{what} {}",
+                if k == 0 {
+                    "crossed threshold"
+                } else {
+                    "back to normal"
+                }
+            );
         }
     };
     s.into()
@@ -38,7 +45,11 @@ pub fn value(e: &EventItem) -> String {
     if e.kind == 2 {
         return String::new();
     }
-    let unit = if e.name.starts_with("cpu") || e.name.starts_with("ram") { "%" } else { "" };
+    let unit = if e.name.starts_with("cpu") || e.name.starts_with("ram") {
+        "%"
+    } else {
+        ""
+    };
     format!("{:.1}{unit}", e.value as f64 / 100.0)
 }
 
@@ -53,7 +64,12 @@ pub fn fmt_time(ts_ms: u64, offset_s: i64) -> String {
     let mp = (5 * doy + 2) / 153;
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    format!("{m:02}-{d:02} {:02}:{:02}:{:02}", sod / 3600, sod % 3600 / 60, sod % 60)
+    format!(
+        "{m:02}-{d:02} {:02}:{:02}:{:02}",
+        sod / 3600,
+        sod % 3600 / 60,
+        sod % 60
+    )
 }
 
 /// Yerel saat farkı, s.
@@ -81,7 +97,12 @@ mod tests {
     fn format() {
         // 2026-11-18 01:02:03 UTC + 3 sa
         assert_eq!(fmt_time(1_794_963_723_000, 3 * 3600), "11-18 04:02:03");
-        let e = |kind, name: &str, value| EventItem { ts_ms: 0, kind, name: name.into(), value };
+        let e = |kind, name: &str, value| EventItem {
+            ts_ms: 0,
+            kind,
+            name: name.into(),
+            value,
+        };
         assert_eq!(value(&e(0, "cpu_high", 5920)), "59.2%");
         assert_eq!(value(&e(2, "service_start", 1)), "");
         assert_eq!(desc(&e(0, "cpu_high", 0)), "CPU usage crossed threshold");

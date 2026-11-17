@@ -77,6 +77,9 @@ component DeckButton inherits Rectangle {
 export struct TopRow { name: string, cpu: string, ws: string }
 export struct FoundPc { label: string, host: string, port: string }
 export struct EventRow { time: string, kind: int, name: string, value: string, desc: string }
+export struct ProcRow { pid: int, name: string, cpu: string, ram: string, protected: bool }
+export struct AiGroupRow { name: string, pct: string, tokens: string, fill: float }
+export struct AiSessRow { end: string, project: string, requests: string, tokens: string, top: string }
 
 // Çizgi grafik: path'ler Rust'ta (viewbox vb × 100), yalnız yeni veride değişir. Dokunmatikte hover yok.
 component Spark inherits Rectangle {
@@ -151,6 +154,7 @@ component HistCard inherits Rectangle {
     in property <string> label;
     in property <string> a;
     in property <string> b;
+    in property <string> c;
     in property <color> ca: Theme.accent;
     in property <color> cb: Theme.accent2;
     in property <string> scale;
@@ -165,7 +169,7 @@ component HistCard inherits Rectangle {
         padding: 10px;
         spacing: 4px;
         Text { text: root.label; color: Theme.dim; font-size: 12px; overflow: elide; }
-        Spark { vertical-stretch: 1; a: root.a; b: root.b; ca: root.ca; cb: root.cb; scale: root.scale; vb: root.vb; }
+        Spark { vertical-stretch: 1; a: root.a; b: root.b; c: root.c; ca: root.ca; cb: root.cb; scale: root.scale; vb: root.vb; }
     }
 }
 
@@ -262,9 +266,35 @@ export component MainWindow inherits Window {
     in property <string> hist-ram-scale;
     in property <string> hist-disk-scale;
     in property <string> hist-net-scale;
+    // Sıcaklık/GPU geçmişi (ADR-0009 `QueryTempHistory`, geçmiş yanıtından sonra)
+    in property <string> hist-cpu-c;
+    in property <string> hist-gpu;
+    in property <string> hist-gpu-c;
+    in property <string> hist-disk-c; // "max 41 °C" ya da ""
     callback query-history(int);
 
-    // --- Sekmeler: 0 Kontrol, 1 Canlı, 2 Olaylar, 3 Geçmiş. Abonelik sekmeye göre (Rust `topics`). ---
+    // --- Süreçler (ADR-0009 `TOPIC_PROCS`; sıralama/süzgeç sunucuda, ilk 50) ---
+    in property <[ProcRow]> procs;
+    in property <string> procs-total;
+    in property <string> procs-msg; // son sonlandırma sonucu
+    in-out property <int> procs-sort: 0; // 0 CPU, 1 RAM
+    in-out property <string> procs-filter;
+    in-out property <int> procs-armed: -1; // onay bekleyen pid (iki aşamalı sonlandırma)
+    callback procs-view();
+    callback kill(int);
+
+    // --- AI raporu (ADR-0009 `QueryAiReport`; yalnız dokunuşla) ---
+    in-out property <int> airep-view: 0; // 0 son oturum, 1 bugün, 2 hafta
+    in property <string> airep-status;
+    in property <string> airep-sub;
+    in property <string> airep-session-line;
+    in property <string> airep-week-line;
+    in property <string> airep-range;
+    in property <[AiGroupRow]> airep-groups;
+    in property <[AiSessRow]> airep-sessions;
+    callback query-ai-report(int);
+
+    // --- Sekmeler: 0 Kontrol, 1 Canlı, 2 Olaylar, 3 Geçmiş, 4 Süreçler, 5 AI. Abonelik sekmeye göre (Rust `topics`). ---
     in-out property <int> tab: 0;
     callback tab-changed();
 
@@ -306,16 +336,20 @@ export component MainWindow inherits Window {
                     background: root.connected ? Theme.ok : Theme.warn;
                 }
             }
-            for l[i] in ["Control", "Live", "Events", "History"]: DeckButton {
+            for l[i] in ["Control", "Live", "Events", "History", "Processes", "AI"]: DeckButton {
                 label: l;
-                font-size: 15px;
-                min-height: 48px;
+                font-size: 14px;
+                min-height: 40px;
                 active: root.tab == i;
                 clicked => {
                     root.tab = i;
+                    root.procs-armed = -1;
                     root.tab-changed();
                     if (i == 3) {
                         root.query-history(root.hist-span);
+                    }
+                    if (i == 5) {
+                        root.query-ai-report(root.airep-view);
                     }
                 }
             }
@@ -323,7 +357,7 @@ export component MainWindow inherits Window {
             DeckButton {
                 icon: Icons.settings;
                 icon-size: 22px;
-                min-height: 44px;
+                min-height: 40px;
                 clicked => { root.settings-open = !root.settings-open; }
             }
         }
@@ -573,13 +607,14 @@ export component MainWindow inherits Window {
                     spacing: 8px;
                     vertical-stretch: 1;
                     // Max önce (soluk), ortalama üstte
-                    HistCard { label: "CPU  avg / max"; a: root.hist-cpu-max; ca: #2f6f8a; b: root.hist-cpu-avg; cb: Theme.accent; vb: root.hist-n; }
+                    HistCard { label: "CPU  avg / max · °C"; a: root.hist-cpu-max; ca: #2f6f8a; b: root.hist-cpu-avg; cb: Theme.accent; c: root.hist-cpu-c; vb: root.hist-n; }
+                    HistCard { label: "GPU  % · °C"; a: root.hist-gpu; b: root.hist-gpu-c; cb: Theme.temp; vb: root.hist-n; }
                     HistCard { label: "RAM"; a: root.hist-ram; scale: root.hist-ram-scale; vb: root.hist-n; }
                 }
                 HorizontalLayout {
                     spacing: 8px;
                     vertical-stretch: 1;
-                    HistCard { label: "DISK  R / W"; a: root.hist-disk-r; b: root.hist-disk-w; scale: root.hist-disk-scale; vb: root.hist-n; }
+                    HistCard { label: "DISK  R / W" + (root.hist-disk-c != "" ? "  · " + root.hist-disk-c : ""); a: root.hist-disk-r; b: root.hist-disk-w; scale: root.hist-disk-scale; vb: root.hist-n; }
                     HistCard { label: "NET  ↓ / ↑"; a: root.hist-net-rx; b: root.hist-net-tx; ca: Theme.ok; scale: root.hist-net-scale; vb: root.hist-n; }
                 }
                 HorizontalLayout {
@@ -603,7 +638,144 @@ export component MainWindow inherits Window {
                 }
             }
 
-            if root.tab != 1 && root.tab != 3: Rectangle { vertical-stretch: 1; }
+            // --- Süreçler: CPU/RAM sıralama + arama, iki aşamalı sonlandırma ---
+            if root.tab == 4: VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    for l[i] in ["CPU", "RAM"]: Chip {
+                        label: l;
+                        active: root.procs-sort == i;
+                        clicked => {
+                            root.procs-sort = i;
+                            root.procs-armed = -1;
+                            root.procs-view();
+                        }
+                    }
+                    LineEdit {
+                        horizontal-stretch: 1;
+                        height: 36px;
+                        text <=> root.procs-filter;
+                        placeholder-text: "Search name or PID";
+                        edited => { Activity.poke(); root.procs-armed = -1; root.procs-view(); }
+                    }
+                    Text { text: root.procs-total; color: Theme.dim; font-size: 12px; vertical-alignment: center; }
+                }
+                if root.procs-msg != "": Text { text: root.procs-msg; color: Theme.warn; font-size: 13px; overflow: elide; }
+                ListView {
+                    vertical-stretch: 1;
+                    for p in root.procs: HorizontalLayout {
+                        spacing: 10px;
+                        padding-top: 2px;
+                        padding-bottom: 2px;
+                        height: 40px;
+                        Text { text: p.name; color: Theme.text; font-size: 15px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                        Text { text: p.pid; color: Theme.dim; font-size: 12px; width: 56px; horizontal-alignment: right; vertical-alignment: center; }
+                        Text { text: p.cpu; color: Theme.text; font-size: 15px; width: 64px; horizontal-alignment: right; vertical-alignment: center; }
+                        Text { text: p.ram; color: Theme.dim; font-size: 15px; width: 80px; horizontal-alignment: right; vertical-alignment: center; }
+                        // Korumalı süreçte düğme yok; ilk dokunuş kurar, ikincisi gönderir
+                        Rectangle {
+                            width: 92px;
+                            if !p.protected: Rectangle {
+                                border-radius: 8px;
+                                background: root.procs-armed == p.pid ? #5a1f12 : Theme.surface;
+                                TouchArea {
+                                    enabled: root.connected;
+                                    clicked => {
+                                        Activity.poke();
+                                        if (root.procs-armed == p.pid) {
+                                            root.procs-armed = -1;
+                                            root.kill(p.pid);
+                                        } else {
+                                            root.procs-armed = p.pid;
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: root.procs-armed == p.pid ? "Confirm" : "End";
+                                    color: root.procs-armed == p.pid ? Theme.warn : Theme.dim;
+                                    font-size: 14px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- AI raporu: görünüm seçimi | grafik + gruplar | oturumlar ---
+            if root.tab == 5: VerticalLayout {
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    for l[i] in ["Last session", "Today", "This week"]: Chip {
+                        label: l;
+                        min-width: 96px;
+                        active: root.airep-view == i;
+                        clicked => {
+                            root.airep-view = i;
+                            root.query-ai-report(i);
+                        }
+                    }
+                    Chip { label: "Refresh"; clicked => { root.query-ai-report(root.airep-view); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: root.airep-status != "" ? root.airep-status : root.airep-sub;
+                        color: Theme.dim;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 6px;
+                        HistCard {
+                            label: "LIMIT  session / week  " + root.airep-range;
+                            a: root.airep-session-line;
+                            b: root.airep-week-line;
+                            vb: 100;
+                        }
+                        for g in root.airep-groups: HorizontalLayout {
+                            spacing: 8px;
+                            height: 20px;
+                            Text { text: g.name; color: Theme.text; font-size: 13px; width: 120px; overflow: elide; vertical-alignment: center; }
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                Rectangle {
+                                    x: 0;
+                                    height: 10px;
+                                    width: parent.width * clamp(g.fill, 0, 1);
+                                    background: Theme.accent;
+                                    border-radius: 2px;
+                                }
+                            }
+                            Text { text: g.pct; color: Theme.text; font-size: 13px; width: 52px; horizontal-alignment: right; vertical-alignment: center; }
+                            Text { text: g.tokens; color: Theme.dim; font-size: 13px; width: 64px; horizontal-alignment: right; vertical-alignment: center; }
+                        }
+                    }
+                    ListView {
+                        horizontal-stretch: 1;
+                        for r in root.airep-sessions: VerticalLayout {
+                            padding-top: 3px;
+                            padding-bottom: 3px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: r.end; color: Theme.dim; font-size: 12px; width: 84px; }
+                                Text { text: r.project; color: Theme.text; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
+                                Text { text: r.tokens; color: Theme.text; font-size: 13px; width: 64px; horizontal-alignment: right; }
+                            }
+                            Text { text: r.requests + " requests · " + r.top; color: Theme.dim; font-size: 12px; overflow: elide; }
+                        }
+                    }
+                }
+            }
+
+            if root.tab == 0 || root.tab == 2: Rectangle { vertical-stretch: 1; }
         }
     }
 
