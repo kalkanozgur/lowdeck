@@ -1,8 +1,8 @@
-// LowDeck ana ekran.
+// LowDeck ana ekran: yatay, solda dikey sekme şeridi (karar 2026-11-18). lowmon-ui ile aynı veri.
 // Tüketim kuralları: siyah zemin (AMOLED), animasyon/sürekli timer YOK,
 // yalnızca property değişince yeniden çizim.
 
-import { Slider, LineEdit } from "std-widgets.slint";
+import { Slider, LineEdit, ListView } from "std-widgets.slint";
 
 global Theme {
     out property <color> bg: #000000;
@@ -11,7 +11,10 @@ global Theme {
     out property <color> text: #e6e6e6;
     out property <color> dim: #8a8a8a;
     out property <color> accent: #4fc3f7;
+    out property <color> accent2: #ba68c8;
     out property <color> warn: #ff7043;
+    out property <color> temp: #ffb74d; // sıcaklık çizgileri (lowmon-ui ile aynı)
+    out property <color> ok: #66bb6a;
     out property <color> disabled: #3a3a3a;
     out property <length> radius: 14px;
 }
@@ -38,7 +41,7 @@ component DeckButton inherits Rectangle {
     in property <length> icon-size: 28px;
     in property <bool> active: false;
     in property <bool> enabled: true;
-    in property <length> font-size: 22px;
+    in property <length> font-size: 20px;
     callback clicked();
 
     // Pasif görünüm renkle; opacity offscreen katman açtırabilir.
@@ -48,7 +51,7 @@ component DeckButton inherits Rectangle {
     background: ta.pressed ? Theme.surface-pressed : Theme.surface;
     border-width: root.active && root.enabled ? 2px : 0px;
     border-color: Theme.accent;
-    min-height: 64px;
+    min-height: 56px;
 
     ta := TouchArea {
         enabled: root.enabled;
@@ -73,31 +76,126 @@ component DeckButton inherits Rectangle {
 
 export struct TopRow { name: string, cpu: string, ws: string }
 export struct FoundPc { label: string, host: string, port: string }
+export struct EventRow { time: string, kind: int, name: string, value: string, desc: string }
 
-// Metrik kutusu; canlı değilse "—" ve pasif renk.
-component Stat inherits VerticalLayout {
+// Çizgi grafik: path'ler Rust'ta (viewbox vb × 100), yalnız yeni veride değişir. Dokunmatikte hover yok.
+component Spark inherits Rectangle {
+    in property <string> a;
+    in property <string> b; // "" = çizgi yok
+    in property <string> c;
+    in property <color> ca;
+    in property <color> cb;
+    in property <color> cc: Theme.temp;
+    in property <string> scale; // "" = sabit 0..%100 ölçek, etiket yok
+    in property <float> vb: 300; // Canlı 300 s, Geçmiş kova sayısı
+    for p in [{ d: root.a, c: root.ca }, { d: root.b, c: root.cb }, { d: root.c, c: root.cc }]: Path {
+        width: 100%;
+        height: 100%;
+        commands: p.d;
+        viewbox-width: root.vb;
+        viewbox-height: 100;
+        fit: fill; // contain en-boy oranını korur → kartı doldurmaz
+        stroke: p.c;
+        stroke-width: 2px; // telefonda 1,5 px ince kalıyor
+        visible: p.d != "";
+    }
+    if root.scale != "": Text {
+        x: 0;
+        y: 0;
+        text: root.scale;
+        color: Theme.dim;
+        font-size: 10px;
+    }
+}
+
+// Canlı kartı: etiket + değer + 5 dk çizgisi.
+component Stat inherits Rectangle {
     in property <string> label;
     in property <string> value;
     in property <bool> live;
-    spacing: 2px;
+    in property <string> path-a;
+    in property <string> path-b;
+    in property <color> color-a: Theme.accent;
+    in property <color> color-b: Theme.accent2;
+    in property <string> scale;
+    background: Theme.surface;
+    border-radius: 8px;
+    // Eşit genişlik: değer metni uzunluğu kartı büyütmesin.
+    preferred-width: 0px;
+    min-width: 0px;
     horizontal-stretch: 1;
-    Text { text: root.label; color: Theme.dim; font-size: 12px; }
+    VerticalLayout {
+        padding: 8px;
+        spacing: 2px;
+        Text { text: root.label; color: Theme.dim; font-size: 12px; overflow: elide; }
+        Text {
+            text: root.live && root.value != "" ? root.value : "—";
+            color: root.live ? Theme.text : Theme.disabled;
+            font-size: 22px;
+            overflow: elide;
+        }
+        Spark {
+            min-height: 56px;
+            vertical-stretch: 1;
+            a: root.path-a;
+            b: root.path-b;
+            ca: root.live ? root.color-a : Theme.disabled;
+            cb: root.live ? root.color-b : Theme.disabled;
+            scale: root.scale;
+        }
+    }
+}
+
+// Geçmiş kartı: etiket + büyük grafik.
+component HistCard inherits Rectangle {
+    in property <string> label;
+    in property <string> a;
+    in property <string> b;
+    in property <color> ca: Theme.accent;
+    in property <color> cb: Theme.accent2;
+    in property <string> scale;
+    in property <float> vb;
+    background: Theme.surface;
+    border-radius: 8px;
+    preferred-width: 0px;
+    min-width: 0px;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    VerticalLayout {
+        padding: 10px;
+        spacing: 4px;
+        Text { text: root.label; color: Theme.dim; font-size: 12px; overflow: elide; }
+        Spark { vertical-stretch: 1; a: root.a; b: root.b; ca: root.ca; cb: root.cb; scale: root.scale; vb: root.vb; }
+    }
+}
+
+// Küçük metin düğmesi (aralık seçimi, Yenile).
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+    min-width: 64px;
+    height: 36px;
+    border-radius: 8px;
+    background: root.active ? Theme.surface-pressed : Theme.surface;
+    TouchArea { clicked => { Activity.poke(); root.clicked(); } }
     Text {
-        text: root.live ? root.value : "—";
-        color: root.live ? Theme.text : Theme.disabled;
-        font-size: 18px;
-        overflow: elide;
+        text: root.label;
+        color: root.active ? Theme.accent : Theme.dim;
+        font-size: 14px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
     }
 }
 
 export component MainWindow inherits Window {
     title: "LowDeck";
     background: Theme.bg;
-    preferred-width: 400px;
-    preferred-height: 820px;
+    preferred-width: 850px;
+    preferred-height: 393px;
 
     // --- Rust -> UI ---
-    in property <string> status: "Bağlanıyor…";
+    in property <string> status: "Connecting…";
     in property <bool> connected: false;
     in-out property <float> volume: 0;
     in property <bool> muted: false;
@@ -108,7 +206,7 @@ export component MainWindow inherits Window {
     in property <string> track-title: "";
     in property <string> track-artist: "";
 
-    // --- LowMonitor metrikleri (agent pipe üzerinden; ≈2 s'de bir push) ---
+    // --- LowMonitor metrikleri (≈ 1–2 s'de bir push; yalnız Canlı sekmesinde abone) ---
     in property <int> lm-state: 0; // 0 = veri yok, 1 = canlı, 2 = LowMonitor servisi yok
     in property <string> lm-cpu;
     in property <string> lm-ram;
@@ -117,6 +215,25 @@ export component MainWindow inherits Window {
     in property <[float]> lm-cores; // 0..1
     in property <[TopRow]> lm-top;
     property <bool> lm-live: root.connected && root.lm-state == 1;
+    // Sensörler (TOPIC_SENSORS, LM ADR-0033); eksik alan ""
+    in property <string> lm-gpu;
+    in property <string> lm-cpu-c;
+    in property <string> lm-gpu-c;
+    in property <string> lm-disk-c;
+    // 5 dk çizgileri (viewbox 300 × 100)
+    in property <string> lm-cpu-path;
+    in property <string> lm-cpu-c-path;
+    in property <string> lm-gpu-path;
+    in property <string> lm-gpu-c-path;
+    in property <string> lm-ram-path;
+    in property <string> lm-disk-r-path;
+    in property <string> lm-disk-w-path;
+    in property <string> lm-net-rx-path;
+    in property <string> lm-net-tx-path;
+    in property <string> lm-disk-scale;
+    in property <string> lm-net-scale;
+    // Aktif LowMonitor alarmları (TOPIC_EVENTS); "" = yok. Her sekmede görünür.
+    in property <string> alarms;
 
     // --- AI (Claude) kullanımı (LM ADR-0032; değişince push) ---
     in property <int> ai-state: 0; // 0 = bekleniyor, 1 = veri var, 2 = PC'de veri yok
@@ -125,7 +242,31 @@ export component MainWindow inherits Window {
     in property <int> ai-session-level; // 0 normal, 1 uyarı, 2 kritik, 3 eski
     in property <int> ai-week-level;
     in property <string> ai-note;
-    property <bool> ai-live: root.connected && root.ai-state == 1;
+
+    // --- Olaylar (son 24 sa; yeni → eski) ---
+    in property <[EventRow]> events;
+    callback refresh-events();
+
+    // --- Geçmiş (ADR-0005; yenileme yalnız dokunuşla) ---
+    in-out property <int> hist-span: 0; // 0 = 1 sa, 1 = 6 sa, 2 = 24 sa, 3 = 7 g
+    in property <string> hist-status;
+    in property <string> hist-range;
+    in property <float> hist-n: 600;
+    in property <string> hist-cpu-avg;
+    in property <string> hist-cpu-max;
+    in property <string> hist-ram;
+    in property <string> hist-disk-r;
+    in property <string> hist-disk-w;
+    in property <string> hist-net-rx;
+    in property <string> hist-net-tx;
+    in property <string> hist-ram-scale;
+    in property <string> hist-disk-scale;
+    in property <string> hist-net-scale;
+    callback query-history(int);
+
+    // --- Sekmeler: 0 Kontrol, 1 Canlı, 2 Olaylar, 3 Geçmiş. Abonelik sekmeye göre (Rust `topics`). ---
+    in-out property <int> tab: 0;
+    callback tab-changed();
 
     // --- Ayarlar ---
     in-out property <bool> settings-open: false;
@@ -146,228 +287,373 @@ export component MainWindow inherits Window {
     callback volume-step(int);
     callback toggle-mute();
     callback media(int); // 0=prev 1=play/pause 2=next 3=stop
+    callback lock(); // PC tuş kilidi (cat-lock, ADR-0008)
     callback save-settings() -> bool; // false: doğrulama hatası, cfg-error dolu
 
-    VerticalLayout {
-        padding: 16px;
-        spacing: 12px;
-
-        // Durum satırı
-        HorizontalLayout {
-            spacing: 10px;
+    HorizontalLayout {
+        // --- Sol sekme şeridi ---
+        VerticalLayout {
+            width: 104px;
+            padding: 8px;
+            spacing: 6px;
             Rectangle {
-                width: 12px;
-                height: 12px;
-                y: (parent.height - self.height) / 2;
-                border-radius: 6px;
-                background: root.connected ? #66bb6a : Theme.warn;
+                height: 16px;
+                Rectangle {
+                    x: 4px;
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 5px;
+                    background: root.connected ? Theme.ok : Theme.warn;
+                }
             }
-            Text {
-                text: root.status;
-                color: Theme.dim;
-                font-size: 14px;
-                vertical-alignment: center;
-                overflow: elide;
+            for l[i] in ["Control", "Live", "Events", "History"]: DeckButton {
+                label: l;
+                font-size: 15px;
+                min-height: 48px;
+                active: root.tab == i;
+                clicked => {
+                    root.tab = i;
+                    root.tab-changed();
+                    if (i == 3) {
+                        root.query-history(root.hist-span);
+                    }
+                }
             }
-            Rectangle { horizontal-stretch: 1; }
+            Rectangle { vertical-stretch: 1; }
             DeckButton {
                 icon: Icons.settings;
                 icon-size: 22px;
-                width: 56px;
-                min-height: 40px;
+                min-height: 44px;
                 clicked => { root.settings-open = !root.settings-open; }
             }
         }
 
-        // --- Ses ---
-        Text { text: "SES"; color: Theme.dim; font-size: 13px; }
-        Text {
-            text: root.device;
-            color: Theme.dim;
-            font-size: 13px;
-            overflow: elide;
-        }
-        HorizontalLayout {
-            spacing: 12px;
-            Text {
-                text: root.muted ? "SESSİZ" : round(root.volume) + "%";
-                color: root.muted ? Theme.warn : Theme.text;
-                font-size: 48px;
-                horizontal-alignment: center;
-                horizontal-stretch: 1;
-            }
-        }
-        Slider {
-            minimum: 0;
-            maximum: 100;
-            value <=> root.volume;
-            enabled: root.connected;
-            changed(v) => { Activity.poke(); root.volume-changed(v); }
-        }
-        HorizontalLayout {
-            spacing: 12px;
-            DeckButton { label: "−"; font-size: 32px; enabled: root.connected; clicked => { root.volume-step(-2); } }
-            DeckButton {
-                icon: root.muted ? Icons.volume-off : Icons.volume;
-                active: root.muted;
-                enabled: root.connected;
-                clicked => { root.toggle-mute(); }
-            }
-            DeckButton { label: "+"; font-size: 32px; enabled: root.connected; clicked => { root.volume-step(2); } }
-        }
-
-        // --- Medya ---
-        Rectangle { height: 8px; }
-        Text { text: "MEDYA"; color: Theme.dim; font-size: 13px; }
+        // --- İçerik ---
         VerticalLayout {
-            spacing: 4px;
-            Text {
-                text: root.has-session ? root.track-title : "Oynatıcı yok";
-                color: Theme.text;
-                font-size: 20px;
-                overflow: elide;
-            }
-            Text {
-                text: root.has-session ? root.track-artist + "  ·  " + root.media-app : "";
-                color: Theme.dim;
-                font-size: 14px;
-                overflow: elide;
-            }
-        }
-        HorizontalLayout {
-            spacing: 12px;
-            DeckButton { icon: Icons.prev; enabled: root.connected; clicked => { root.media(0); } }
-            DeckButton {
-                icon: root.playing ? Icons.pause : Icons.play;
-                icon-size: 40px;
-                active: root.playing;
-                enabled: root.connected;
-                min-height: 88px;
-                clicked => { root.media(1); }
-            }
-            DeckButton { icon: Icons.next; enabled: root.connected; clicked => { root.media(2); } }
-        }
+            padding: 12px;
+            padding-left: 4px;
+            spacing: 8px;
 
-        // --- AI (Claude kullanımı) ---
-        Rectangle { height: 8px; }
-        HorizontalLayout {
-            Text { text: "AI"; color: Theme.dim; font-size: 13px; }
-            Rectangle { horizontal-stretch: 1; }
-            Text {
-                text: !root.connected ? "" : root.ai-state == 2 ? "PC'de veri yok" : root.ai-state == 0 ? "bekleniyor…" : root.ai-note;
-                color: Theme.dim;
+            // Bağlantı sorunluyken durum metni (bağlıyken yalnız yeşil nokta)
+            if !root.connected || root.lm-state == 2: Text {
+                text: root.connected ? "LowMonitor service not running" : root.status;
+                color: Theme.warn;
                 font-size: 13px;
                 overflow: elide;
             }
-        }
-        HorizontalLayout {
-            spacing: 12px;
-            for row in [
-                { text: root.ai-session, level: root.ai-session-level },
-                { text: root.ai-week, level: root.ai-week-level },
-            ]: Text {
-                horizontal-stretch: 1;
-                text: root.ai-live ? row.text : "—";
-                // C++/taskbar paleti: uyarı turuncu, kritik kırmızı, eski gri
-                color: !root.ai-live || row.level == 3 ? Theme.disabled : row.level == 2 ? #e5484d : row.level == 1 ? #f0a030 : Theme.text;
-                font-size: 18px;
-                overflow: elide;
-            }
-        }
-
-        // --- PC (LowMonitor) ---
-        Rectangle { height: 8px; }
-        HorizontalLayout {
-            Text { text: "PC"; color: Theme.dim; font-size: 13px; }
-            Rectangle { horizontal-stretch: 1; }
-            Text {
-                text: !root.connected ? "" : root.lm-state == 2 ? "LowMonitor servisi yok" : root.lm-state == 0 ? "bekleniyor…" : "";
-                color: root.lm-state == 2 ? Theme.warn : Theme.dim;
-                font-size: 13px;
-            }
-        }
-        HorizontalLayout {
-            spacing: 12px;
-            Stat { label: "CPU"; value: root.lm-cpu; live: root.lm-live; }
-            Stat { label: "RAM"; value: root.lm-ram; live: root.lm-live; }
-        }
-        HorizontalLayout {
-            spacing: 12px;
-            Stat { label: "DİSK  B/s"; value: root.lm-disk; live: root.lm-live; }
-            Stat { label: "AĞ  B/s"; value: root.lm-net; live: root.lm-live; }
-        }
-        // Çekirdek başına çubuk (alttan dolar). Layout değil mutlak konum: `for` içeren
-        // layout boşken max-width = 0 verip pencereyi daraltıyordu.
-        bars := Rectangle {
-            height: 24px;
-            property <length> slot: self.width / max(1, root.lm-cores.length);
-            for c[i] in root.lm-cores: Rectangle {
-                x: i * bars.slot;
-                width: bars.slot - 3px;
-                background: Theme.surface;
-                Rectangle {
-                    height: parent.height * clamp(c, 0, 1);
-                    y: parent.height - self.height;
-                    background: root.lm-live ? Theme.accent : Theme.disabled;
+            if root.connected && root.alarms != "": Rectangle {
+                background: #3a1d14;
+                border-radius: 6px;
+                height: 28px;
+                Text {
+                    x: 10px;
+                    height: parent.height;
+                    text: "⚠ Active alarm: " + root.alarms;
+                    color: Theme.warn;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    overflow: elide;
                 }
             }
-        }
-        Rectangle {
-            height: 5 * 20px; // Top-5 sabit yükseklik: liste değişince yerleşim zıplamaz
-            VerticalLayout {
-                width: parent.width;
-                height: parent.height;
-                alignment: start;
-                spacing: 2px;
-                for t in root.lm-top: HorizontalLayout {
+
+            // --- Kontrol: ses | medya + kilit ---
+            if root.tab == 0: HorizontalLayout {
+                spacing: 16px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
                     spacing: 8px;
-                    Text { text: t.name; color: root.lm-live ? Theme.text : Theme.disabled; font-size: 14px; overflow: elide; horizontal-stretch: 1; }
-                    Text { text: t.cpu; color: root.lm-live ? Theme.text : Theme.disabled; font-size: 14px; width: 56px; horizontal-alignment: right; }
-                    Text { text: t.ws; color: Theme.dim; font-size: 14px; width: 72px; horizontal-alignment: right; }
+                    alignment: start;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "VOLUME"; color: Theme.dim; font-size: 13px; }
+                        Text { text: root.device; color: Theme.dim; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
+                    }
+                    Text {
+                        text: root.muted ? "MUTED" : round(root.volume) + "%";
+                        color: root.muted ? Theme.warn : Theme.text;
+                        font-size: 44px;
+                        horizontal-alignment: center;
+                    }
+                    Slider {
+                        minimum: 0;
+                        maximum: 100;
+                        value <=> root.volume;
+                        enabled: root.connected;
+                        changed(v) => { Activity.poke(); root.volume-changed(v); }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        DeckButton { label: "−"; font-size: 32px; min-height: 72px; enabled: root.connected; clicked => { root.volume-step(-2); } }
+                        DeckButton {
+                            icon: root.muted ? Icons.volume-off : Icons.volume;
+                            min-height: 72px;
+                            active: root.muted;
+                            enabled: root.connected;
+                            clicked => { root.toggle-mute(); }
+                        }
+                        DeckButton { label: "+"; font-size: 32px; min-height: 72px; enabled: root.connected; clicked => { root.volume-step(2); } }
+                    }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 8px;
+                    alignment: start;
+                    Text { text: "MEDIA"; color: Theme.dim; font-size: 13px; }
+                    Text {
+                        text: root.has-session ? root.track-title : "No player";
+                        color: Theme.text;
+                        font-size: 20px;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.has-session ? root.track-artist + "  ·  " + root.media-app : "";
+                        color: Theme.dim;
+                        font-size: 14px;
+                        overflow: elide;
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        DeckButton { icon: Icons.prev; min-height: 80px; enabled: root.connected; clicked => { root.media(0); } }
+                        DeckButton {
+                            icon: root.playing ? Icons.pause : Icons.play;
+                            icon-size: 40px;
+                            min-height: 80px;
+                            active: root.playing;
+                            enabled: root.connected;
+                            clicked => { root.media(1); }
+                        }
+                        DeckButton { icon: Icons.next; min-height: 80px; enabled: root.connected; clicked => { root.media(2); } }
+                    }
+                    // PC tuş kilidi: açma PC'de kodla
+                    DeckButton { label: "Lock PC keyboard"; font-size: 16px; min-height: 52px; enabled: root.connected; clicked => { root.lock(); } }
                 }
             }
-        }
 
-        Rectangle { vertical-stretch: 1; }
+            // --- Canlı: AI bandı, 5 kart, top-5 | çekirdekler ---
+            if root.tab == 1: VerticalLayout {
+                spacing: 8px;
+                if root.connected && root.ai-state == 1: Rectangle {
+                    background: Theme.surface;
+                    border-radius: 6px;
+                    height: 28px;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 20px;
+                        Text { text: "AI"; color: Theme.dim; font-size: 13px; vertical-alignment: center; }
+                        // C++/taskbar paleti: uyarı turuncu, kritik kırmızı, eski gri
+                        for row in [
+                            { text: root.ai-session, level: root.ai-session-level },
+                            { text: root.ai-week, level: root.ai-week-level },
+                        ]: Text {
+                            text: row.text;
+                            color: row.level == 3 ? Theme.dim : row.level == 2 ? #e5484d : row.level == 1 ? #f0a030 : Theme.text;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: root.ai-note; color: Theme.dim; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 1;
+                    // Sıcaklık çizgisi aynı 0..100 ekseninde (°C), turuncu
+                    Stat {
+                        label: "CPU  5 min";
+                        value: root.lm-cpu + (root.lm-cpu-c != "" ? "  " + root.lm-cpu-c : "");
+                        live: root.lm-live;
+                        path-a: root.lm-cpu-path;
+                        path-b: root.lm-cpu-c-path;
+                        color-b: Theme.temp;
+                    }
+                    Stat {
+                        label: "GPU  5 min";
+                        value: root.lm-gpu + (root.lm-gpu-c != "" ? "  " + root.lm-gpu-c : "");
+                        live: root.lm-live;
+                        path-a: root.lm-gpu-path;
+                        path-b: root.lm-gpu-c-path;
+                        color-b: Theme.temp;
+                    }
+                    Stat { label: "RAM  5 min"; value: root.lm-ram; live: root.lm-live; path-a: root.lm-ram-path; }
+                    Stat {
+                        label: "DISK  R / W" + (root.lm-disk-c != "" ? "  · " + root.lm-disk-c : "");
+                        value: root.lm-disk;
+                        live: root.lm-live;
+                        path-a: root.lm-disk-r-path;
+                        path-b: root.lm-disk-w-path;
+                        scale: root.lm-disk-scale;
+                    }
+                    Stat {
+                        label: "NET  ↓ / ↑";
+                        value: root.lm-net;
+                        live: root.lm-live;
+                        path-a: root.lm-net-rx-path;
+                        path-b: root.lm-net-tx-path;
+                        color-a: Theme.ok;
+                        scale: root.lm-net-scale;
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    height: 5 * 22px; // Top-5 sabit yükseklik: liste değişince yerleşim zıplamaz
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        VerticalLayout {
+                            width: parent.width;
+                            height: parent.height;
+                            alignment: start;
+                            spacing: 2px;
+                            for t in root.lm-top: HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: t.name; color: root.lm-live ? Theme.text : Theme.disabled; font-size: 15px; overflow: elide; horizontal-stretch: 1; }
+                                Text { text: t.cpu; color: root.lm-live ? Theme.text : Theme.disabled; font-size: 15px; width: 64px; horizontal-alignment: right; }
+                                Text { text: t.ws; color: Theme.dim; font-size: 15px; width: 80px; horizontal-alignment: right; }
+                            }
+                        }
+                    }
+                    // Çekirdek başına çubuk (alttan dolar). Mutlak konum: `for` içeren layout boşken max-width = 0 veriyordu.
+                    bars := Rectangle {
+                        horizontal-stretch: 1;
+                        property <length> slot: self.width / max(1, root.lm-cores.length);
+                        for c[i] in root.lm-cores: Rectangle {
+                            x: i * bars.slot;
+                            width: bars.slot - 3px;
+                            background: Theme.surface;
+                            Rectangle {
+                                height: parent.height * clamp(c, 0, 1);
+                                y: parent.height - self.height;
+                                background: root.lm-live ? Theme.accent : Theme.disabled;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- Olaylar: son 24 sa, yeni → eski ---
+            if root.tab == 2: VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout {
+                    Text { text: "LAST 24 HOURS"; color: Theme.dim; font-size: 12px; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Chip { label: "Refresh"; active: true; clicked => { root.refresh-events(); } }
+                }
+                if root.events.length == 0: Text {
+                    text: root.connected ? "No events" : "—";
+                    color: Theme.dim;
+                    font-size: 14px;
+                }
+                ListView {
+                    vertical-stretch: 1;
+                    for e in root.events: HorizontalLayout {
+                        spacing: 10px;
+                        padding-top: 3px;
+                        padding-bottom: 3px;
+                        Text { text: e.time; color: Theme.dim; font-size: 13px; width: 112px; }
+                        Text {
+                            text: e.kind == 0 ? "ALARM" : e.kind == 1 ? "cleared" : "system";
+                            color: e.kind == 0 ? Theme.warn : e.kind == 1 ? Theme.ok : Theme.dim;
+                            font-size: 13px;
+                            width: 80px;
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            Text { text: e.name; color: Theme.text; font-size: 13px; overflow: elide; }
+                            if e.desc != "": Text { text: e.desc; color: Theme.dim; font-size: 12px; overflow: elide; }
+                        }
+                        Text { text: e.value; color: Theme.text; font-size: 13px; width: 64px; horizontal-alignment: right; }
+                    }
+                }
+            }
+
+            // --- Geçmiş: hazır aralıklar, bitiş = şimdi ---
+            if root.tab == 3: VerticalLayout {
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 1;
+                    // Max önce (soluk), ortalama üstte
+                    HistCard { label: "CPU  avg / max"; a: root.hist-cpu-max; ca: #2f6f8a; b: root.hist-cpu-avg; cb: Theme.accent; vb: root.hist-n; }
+                    HistCard { label: "RAM"; a: root.hist-ram; scale: root.hist-ram-scale; vb: root.hist-n; }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 1;
+                    HistCard { label: "DISK  R / W"; a: root.hist-disk-r; b: root.hist-disk-w; scale: root.hist-disk-scale; vb: root.hist-n; }
+                    HistCard { label: "NET  ↓ / ↑"; a: root.hist-net-rx; b: root.hist-net-tx; ca: Theme.ok; scale: root.hist-net-scale; vb: root.hist-n; }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    for l[i] in ["1 h", "6 h", "24 h", "7 d"]: Chip {
+                        label: l;
+                        active: root.hist-span == i;
+                        clicked => {
+                            root.hist-span = i;
+                            root.query-history(i);
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: root.hist-status != "" ? root.hist-status : root.hist-range;
+                        color: Theme.dim;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            if root.tab != 1 && root.tab != 3: Rectangle { vertical-stretch: 1; }
+        }
     }
 
-    // --- Ayarlar paneli (üstte) ---
+    // --- Ayarlar paneli (üstte, opak): sol keşif | sağ alanlar ---
     if root.settings-open: Rectangle {
-        background: #000000f0;
+        background: Theme.bg;
         TouchArea { } // alttakine tıklamayı engelle
-        VerticalLayout {
-            padding: 24px;
-            spacing: 12px;
-            alignment: start;
-            Text { text: "Bağlantı"; color: Theme.text; font-size: 22px; }
-            HorizontalLayout {
-                spacing: 12px;
-                DeckButton { label: "PC'yi bul"; width: 140px; clicked => { root.discover(); } }
-                Text { text: root.discover-status; color: Theme.dim; font-size: 13px; vertical-alignment: center; wrap: word-wrap; }
-            }
-            for f in root.found: DeckButton {
-                label: f.label;
-                clicked => {
-                    root.cfg-host = f.host;
-                    root.cfg-port = f.port;
+        HorizontalLayout {
+            padding: 16px;
+            spacing: 24px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 10px;
+                alignment: start;
+                Text { text: "Connection"; color: Theme.text; font-size: 22px; }
+                DeckButton { label: "Find PC"; font-size: 18px; min-height: 48px; clicked => { root.discover(); } }
+                Text { text: root.discover-status; color: Theme.dim; font-size: 13px; wrap: word-wrap; }
+                for f in root.found: DeckButton {
+                    label: f.label;
+                    font-size: 14px;
+                    min-height: 44px;
+                    clicked => {
+                        root.cfg-host = f.host;
+                        root.cfg-port = f.port;
+                    }
                 }
             }
-            Text { text: "PC adresi (IP ya da ad)"; color: Theme.dim; font-size: 13px; }
-            LineEdit { text <=> root.cfg-host; placeholder-text: "192.168.1.x"; }
-            Text { text: "Port"; color: Theme.dim; font-size: 13px; }
-            LineEdit { text <=> root.cfg-port; input-type: number; }
-            Text { text: "Token"; color: Theme.dim; font-size: 13px; }
-            LineEdit { text <=> root.cfg-token; input-type: password; }
-            if root.cfg-error != "": Text { text: root.cfg-error; color: Theme.warn; font-size: 14px; wrap: word-wrap; }
-            HorizontalLayout {
-                spacing: 12px;
-                DeckButton { label: "İptal"; clicked => { root.cfg-error = ""; root.settings-open = false; } }
-                DeckButton {
-                    label: "Kaydet";
-                    active: true;
-                    clicked => {
-                        if (root.save-settings()) {
-                            root.settings-open = false;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 6px;
+                alignment: start;
+                Text { text: "PC address (IP or name)"; color: Theme.dim; font-size: 13px; }
+                LineEdit { text <=> root.cfg-host; placeholder-text: "192.168.1.x"; }
+                Text { text: "Port"; color: Theme.dim; font-size: 13px; }
+                LineEdit { text <=> root.cfg-port; input-type: number; }
+                Text { text: "Token"; color: Theme.dim; font-size: 13px; }
+                LineEdit { text <=> root.cfg-token; input-type: password; }
+                if root.cfg-error != "": Text { text: root.cfg-error; color: Theme.warn; font-size: 13px; wrap: word-wrap; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    padding-top: 6px;
+                    DeckButton { label: "Cancel"; min-height: 48px; clicked => { root.cfg-error = ""; root.settings-open = false; } }
+                    DeckButton {
+                        label: "Save";
+                        min-height: 48px;
+                        active: true;
+                        clicked => {
+                            if (root.save-settings()) {
+                                root.settings-open = false;
+                            }
                         }
                     }
                 }

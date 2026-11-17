@@ -6,11 +6,15 @@ slint::include_modules!();
 
 mod config;
 mod discover;
+mod events;
+mod graph;
 
 use config::AppConfig;
+use graph::{nice_scale, series_path, History, Sample};
 use lowdeck_client::{Client, Config, Event};
 use lowdeck_proto::{
-    AiUsage, AiWindow, AudioCmd, MediaCmd, Metrics, Topics, TopItem, PROTO_VERSION, S2C, TOPIC_AI, TOPIC_METRICS,
+    AiUsage, AiWindow, AudioCmd, EventItem, HistPoint, MediaCmd, Metrics, Sensors, Topics, TopItem, C2S,
+    HIST_POINTS_MAX, PROTO_VERSION, S2C, TOPIC_AI, TOPIC_EVENTS, TOPIC_METRICS, TOPIC_SENSORS,
 };
 use slint::{Model, ModelRc, VecModel};
 use std::cell::{Cell, RefCell};
@@ -29,8 +33,31 @@ const LOCAL_ECHO_GUARD: Duration = Duration::from_millis(400);
 /// Bu süre dokunulmazsa siyah perde iner.
 const BLACKOUT_AFTER: Duration = Duration::from_secs(120);
 
-/// Ekran açıkken abone olunan konular: PC metrikleri + AI kullanımı (LM ADR-0032).
-const TOPICS: Topics = TOPIC_METRICS | TOPIC_AI;
+/// Ekran açıkken sekmeye göre konular: görünmeyen veri için PC de telefon da uyanmasın.
+/// Olaylar (alarm bandı + Olaylar listesi) her sekmede; seyrek gelir.
+fn topics(tab: i32) -> Topics {
+    match tab {
+        1 => TOPIC_EVENTS | TOPIC_METRICS | TOPIC_SENSORS | TOPIC_AI, // Canlı
+        _ => TOPIC_EVENTS,                                            // Kontrol, Olaylar, Geçmiş
+    }
+}
+
+/// Olaylar sekmesi: bağlanınca ve "Yenile"de son 24 saat istenir (LM ile aynı).
+const EVENTS_SPAN_MS: u64 = 24 * 3_600_000;
+const EVENTS_MAX: usize = 500;
+/// Geçmiş aralıkları: 1 sa, 6 sa, 24 sa, 7 g.
+const HIST_SPANS_MS: [u64; 4] = [3_600_000, 6 * 3_600_000, 24 * 3_600_000, 7 * 24 * 3_600_000];
+
+/// Geçmiş yanıt tamponu. `pending` = yanıtı bitmemiş sorgu sayısı: yalnız sonuncusunun parçaları tutulur.
+#[derive(Default)]
+struct HistRx {
+    pending: u32,
+    from_ms: u64,
+    step_ms: u64,
+    pts: Vec<Option<HistPoint>>,
+    /// Son `Metrics`'ten; RAM grafiği ölçeği (yoksa geçmişteki max).
+    ram_total_mb: u32,
+}
 
 /// Yaşam döngüsü kancası (true = öne geldi). `run` kurar, Android olay dinleyicisi çağırır.
 type ActiveHook = Box<dyn Fn(bool)>;
@@ -39,6 +66,14 @@ thread_local! {
     static ON_ACTIVE: RefCell<Option<ActiveHook>> = const { RefCell::new(None) };
     /// Son AI durumu: geri sayım her metrik push'unda (≈2 s) telefonun saatiyle yenilenir.
     static LAST_AI: RefCell<Option<AiUsage>> = const { RefCell::new(None) };
+    /// Son sensör okuması; grafik örneğine eklenir.
+    static LAST_SENS: Cell<Option<Sensors>> = const { Cell::new(None) };
+    /// Canlı grafik geçmişi + yeniden kullanılan path buffer'ı.
+    static HIST: RefCell<(History, String)> = RefCell::new((History::default(), String::new()));
+    static HQ: RefCell<HistRx> = RefCell::new(HistRx::default());
+    /// Bağlanınca olay sorgusu (`run` kurar; `apply` Connected'da çağırır).
+    static QUERY_EVENTS: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
+    static OFFSET_S: Cell<i64> = const { Cell::new(0) };
 }
 
 #[cfg(target_os = "android")]
@@ -47,7 +82,11 @@ fn android_main(app: slint::android::AndroidApp) {
     use slint::android::android_activity::{MainEvent, PollEvent, WindowManagerFlags};
     let data_dir = app.internal_data_path();
     // Önde iken ekran açık; boşta siyah perde UI'da. JNI gerekmez.
-    app.set_window_flags(WindowManagerFlags::KEEP_SCREEN_ON, WindowManagerFlags::empty());
+    // FULLSCREEN: durum çubuğu gizli (kullanıcı kararı 2026-11-18; jest çubuğu kalır, JNI yok).
+    app.set_window_flags(
+        WindowManagerFlags::KEEP_SCREEN_ON | WindowManagerFlags::FULLSCREEN,
+        WindowManagerFlags::empty(),
+    );
     slint::android::init_with_event_listener(app, |ev| {
         let active = match ev {
             PollEvent::Main(MainEvent::Pause) => false,
@@ -66,6 +105,9 @@ fn android_main(app: slint::android::AndroidApp) {
 
 pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::PlatformError> {
     let ui = MainWindow::new()?;
+    OFFSET_S.set(events::local_offset_s());
+    let event_rows = Rc::new(VecModel::<EventRow>::default());
+    ui.set_events(ModelRc::from(event_rows.clone()));
     let cfg_path = data_dir.map(|d| d.join("lowdeck.cfg"));
     let cfg = config::load(cfg_path.as_deref());
 
@@ -91,7 +133,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
             let my_gen = generation.fetch_add(1, Ordering::Relaxed) + 1;
             let Some(ui) = weak.upgrade() else { return };
             if c.host.is_empty() {
-                ui.set_status("PC adresi ayarlanmadı".into());
+                ui.set_status("PC address not set".into());
                 ui.set_settings_open(true);
                 return;
             }
@@ -112,7 +154,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
             );
             // Perde inikken metrik yok: ekranda görünmeyen veri için PC de telefon da uyanmasın.
             if !ui.get_blackout() {
-                c.subscribe(TOPICS);
+                c.subscribe(topics(ui.get_tab()));
             }
             *client.borrow_mut() = Some(c);
         }
@@ -142,15 +184,71 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
         let client = client.clone();
         move || {
             idle.restart();
-            if let Some(ui) = weak.upgrade() {
-                ui.set_blackout(false);
-            }
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_blackout(false);
             if let Some(c) = client.borrow().as_ref() {
-                c.subscribe(TOPICS); // değişmediyse gönderilmez
+                c.subscribe(topics(ui.get_tab())); // değişmediyse gönderilmez
             }
         }
     };
     ui.global::<Activity>().on_poke(poke.clone());
+    {
+        let weak = ui.as_weak();
+        let client = client.clone();
+        ui.on_tab_changed(move || {
+            if let (Some(ui), Some(c)) = (weak.upgrade(), client.borrow().as_ref()) {
+                c.subscribe(topics(ui.get_tab()));
+            }
+        });
+    }
+    // --- Olaylar: bağlanınca + "Yenile" → son 24 saat ---
+    {
+        let client = client.clone();
+        let query = move || {
+            let from_ms = now_ms().saturating_sub(EVENTS_SPAN_MS);
+            let sent = client
+                .borrow()
+                .as_ref()
+                .is_some_and(|c| c.send(&C2S::QueryEvents { from_ms, to_ms: u64::MAX }));
+            if sent {
+                event_rows.set_vec(Vec::new()); // yanıt event loop'ta sonra gelir
+            }
+        };
+        let query = Rc::new(query);
+        let q = query.clone();
+        ui.on_refresh_events(move || q());
+        QUERY_EVENTS.with(|h| *h.borrow_mut() = Some(Box::new(move || query())));
+    }
+    // --- Geçmiş: sekmeye geçiş / aralık düğmesi → tek sorgu; otomatik yenileme yok (ADR-0005) ---
+    {
+        let client = client.clone();
+        let weak = ui.as_weak();
+        ui.on_query_history(move |span| {
+            let Some(ui) = weak.upgrade() else { return };
+            let now = now_ms();
+            let from_ms = now.saturating_sub(HIST_SPANS_MS[span.clamp(0, 3) as usize]);
+            let sent = client.borrow().as_ref().is_some_and(|c| {
+                c.send(&C2S::QueryHistory { from_ms, to_ms: now, points: HIST_POINTS_MAX })
+            });
+            if sent {
+                HQ.with_borrow_mut(|h| {
+                    h.pending += 1;
+                    h.pts.clear();
+                });
+                ui.set_hist_status("Loading…".into());
+            } else {
+                ui.set_hist_status("Not connected to PC".into());
+            }
+        });
+    }
+    {
+        let client = client.clone();
+        ui.on_lock(move || {
+            if let Some(c) = client.borrow().as_ref() {
+                c.send(&C2S::Lock);
+            }
+        });
+    }
 
     // --- Yaşam döngüsü: arka planda bağlantı yok (sıfır ağ trafiği) ---
     {
@@ -171,7 +269,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                     generation.fetch_add(1, Ordering::Relaxed);
                     if let Some(ui) = weak.upgrade() {
                         ui.set_connected(false);
-                        ui.set_status("Duraklatıldı".into());
+                        ui.set_status("Paused".into());
                     }
                 }
             }))
@@ -277,7 +375,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
         let weak = ui.as_weak();
         ui.on_discover(move || {
             let Some(ui) = weak.upgrade() else { return };
-            ui.set_discover_status("Aranıyor…".into());
+            ui.set_discover_status("Searching…".into());
             set_vec(ui.get_found(), Vec::new(), |v| ui.set_found(v));
             let weak = weak.clone();
             std::thread::spawn(move || {
@@ -291,7 +389,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                                 b.name,
                                 b.host,
                                 b.port,
-                                if b.proto != PROTO_VERSION { "  (sürüm farklı)" } else { "" }
+                                if b.proto != PROTO_VERSION { "  (version differs)" } else { "" }
                             )
                             .into(),
                             host: b.host.as_str().into(),
@@ -299,8 +397,8 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                         })
                         .collect();
                     ui.set_discover_status(match rows.len() {
-                        0 => "Bulunamadı: aynı Wi-Fi'da mı, agent açık mı, firewall kuralı var mı?".into(),
-                        n => format!("{n} PC bulundu, seç; token agent tray menüsünde").into(),
+                        0 => "Not found: same Wi-Fi? LowMonitor tray running? firewall rule?".into(),
+                        n => format!("{n} PC found, pick one; token is in the tray menu").into(),
                     });
                     set_vec(ui.get_found(), rows, |v| ui.set_found(v));
                 });
@@ -311,6 +409,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
     let r = ui.run();
     // Kanca ui/client'ı tutuyor; event loop bitince bırak (Android'de android_main tekrar çağrılabilir).
     ON_ACTIVE.with(|h| h.borrow_mut().take());
+    QUERY_EVENTS.with(|h| h.borrow_mut().take());
     r
 }
 
@@ -319,17 +418,62 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
     match ev {
         Event::Connecting => {
             ui.set_connected(false);
-            ui.set_status("Bağlanıyor…".into());
+            ui.set_status("Connecting…".into());
         }
         Event::Connected { server } => {
             ui.set_connected(true);
-            ui.set_status(format!("Bağlı: {server}").into());
+            ui.set_status(format!("Connected: {server}").into());
+            QUERY_EVENTS.with(|q| q.borrow().as_ref().map(|f| f()));
         }
         Event::Disconnected { reason } => {
             ui.set_connected(false);
-            ui.set_status(format!("Koptu: {reason}").into());
+            ui.set_status(format!("Disconnected: {reason}").into());
             ui.set_lm_state(0);
             ui.set_ai_state(0);
+            ui.set_alarms("".into());
+            LAST_SENS.set(None);
+            show_sensors(ui, None);
+            clear_graphs(ui);
+            HQ.with_borrow_mut(|h| h.pending = 0); // yanıtlar kayboldu
+            ui.set_hist_status("".into());
+        }
+        Event::Msg(S2C::Alarms(a)) => ui.set_alarms(a.join(", ").into()),
+        Event::Msg(S2C::Sensors(s)) => {
+            LAST_SENS.set(Some(s));
+            show_sensors(ui, Some(&s));
+        }
+        Event::Msg(S2C::Event(e)) => {
+            // Aktif alarm listesi yalnız gösterim için güncellenir (asıl liste sunucuda).
+            let mut a: Vec<String> =
+                ui.get_alarms().split(", ").filter(|s| !s.is_empty()).map(String::from).collect();
+            match e.kind {
+                0 if !a.contains(&e.name) => a.push(e.name.clone()),
+                1 => a.retain(|x| *x != e.name),
+                _ => {}
+            }
+            ui.set_alarms(a.join(", ").into());
+            prepend(ui, &[e]);
+        }
+        // Parçalar eskiden yeniye gelir; her biri başa eklenince liste yeniden eskiye sıralı kalır.
+        Event::Msg(S2C::Events(v)) => prepend(ui, &v),
+        Event::Msg(S2C::History { from_ms, step_ms, points }) => {
+            let done = HQ.with_borrow_mut(|h| {
+                if h.pending == 0 {
+                    return false;
+                }
+                if points.is_empty() {
+                    h.pending -= 1;
+                    return h.pending == 0;
+                }
+                if h.pending == 1 {
+                    (h.from_ms, h.step_ms) = (from_ms, step_ms);
+                    h.pts.extend(points);
+                }
+                false
+            });
+            if done {
+                draw_history(ui);
+            }
         }
         Event::Msg(S2C::Audio(a)) => {
             if last_local_edit.lock().unwrap().elapsed() >= LOCAL_ECHO_GUARD {
@@ -347,6 +491,7 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
         }
         Event::Msg(S2C::Metrics(None)) => {
             ui.set_lm_state(2);
+            clear_graphs(ui);
             set_vec(ui.get_lm_cores(), Vec::new(), |v| ui.set_lm_cores(v));
             set_vec(ui.get_lm_top(), Vec::new(), |v| ui.set_lm_top(v));
         }
@@ -370,10 +515,138 @@ fn show_metrics(ui: &MainWindow, m: &Metrics) {
     ui.set_lm_state(1);
     ui.set_lm_cpu(format!("{:.0}%", m.cpu as f32 / 100.0).into());
     ui.set_lm_ram(format!("{:.1} / {:.0} GB", m.ram_used_mb as f32 / 1024.0, m.ram_total_mb as f32 / 1024.0).into());
-    ui.set_lm_disk(format!("R {}  W {}", rate(m.disk_r_kbps), rate(m.disk_w_kbps)).into());
-    ui.set_lm_net(format!("↓ {}  ↑ {}", rate(m.net_rx_kbps), rate(m.net_tx_kbps)).into());
+    ui.set_lm_disk(format!("{} / {}", rate(m.disk_r_kbps), rate(m.disk_w_kbps)).into());
+    ui.set_lm_net(format!("{} / {}", rate(m.net_rx_kbps), rate(m.net_tx_kbps)).into());
     let cores = m.cores.iter().map(|&c| c as f32 / 200.0).collect();
     set_vec(ui.get_lm_cores(), cores, |v| ui.set_lm_cores(v));
+    HQ.with_borrow_mut(|h| h.ram_total_mb = m.ram_total_mb);
+    graphs(ui, m, now_ms() / 1000);
+}
+
+/// LM ile aynı: eksik alan boş metin.
+fn show_sensors(ui: &MainWindow, v: Option<&Sensors>) {
+    let c = |t: Option<i16>| t.map(|t| format!("{t} °C")).unwrap_or_default();
+    let v = v.copied().unwrap_or_default();
+    ui.set_lm_cpu_c(c(v.cpu_c).into());
+    ui.set_lm_gpu_c(c(v.gpu_c).into());
+    ui.set_lm_disk_c(c(v.disk_c).into());
+    ui.set_lm_gpu(v.gpu_pct.map(|p| format!("{p}%")).unwrap_or_default().into());
+}
+
+/// Örneği geçmişe ekler, 9 çizgi + 2 ölçek etiketini günceller (Metrics başına bir kez).
+fn graphs(ui: &MainWindow, m: &Metrics, now_s: u64) {
+    let sens = LAST_SENS.get();
+    // °C ekseni 0..100 (CPU % ile aynı kartta)
+    let temp = |t: Option<i16>| t.map(|t| t as f32 / 100.0);
+    HIST.with_borrow_mut(|(h, buf)| {
+        h.push(Sample {
+            ts_s: now_s,
+            cpu: m.cpu,
+            ram: m.ram_used_mb as f32 / m.ram_total_mb.max(1) as f32,
+            dr: m.disk_r_kbps,
+            dw: m.disk_w_kbps,
+            rx: m.net_rx_kbps,
+            tx: m.net_tx_kbps,
+            cpu_c: sens.and_then(|v| v.cpu_c),
+            gpu_pct: sens.and_then(|v| v.gpu_pct),
+            gpu_c: sens.and_then(|v| v.gpu_c),
+        });
+        let mut line = |f: &dyn Fn(&Sample) -> Option<f32>, set: fn(&MainWindow, slint::SharedString)| {
+            h.path(now_s, f, buf);
+            set(ui, buf.as_str().into());
+        };
+        line(&|s| Some(s.cpu as f32 / 10_000.0), MainWindow::set_lm_cpu_path);
+        line(&|s| temp(s.cpu_c), MainWindow::set_lm_cpu_c_path);
+        line(&|s| s.gpu_pct.map(|p| p as f32 / 100.0), MainWindow::set_lm_gpu_path);
+        line(&|s| temp(s.gpu_c), MainWindow::set_lm_gpu_c_path);
+        line(&|s| Some(s.ram), MainWindow::set_lm_ram_path);
+        // Disk/ağ: iki çizgi ortak ölçekte (penceredeki max, 1-2-5 yuvarlama).
+        let disk = nice_scale(h.max(now_s, |s| s.dr.max(s.dw))) as f32;
+        line(&|s| Some(s.dr as f32 / disk), MainWindow::set_lm_disk_r_path);
+        line(&|s| Some(s.dw as f32 / disk), MainWindow::set_lm_disk_w_path);
+        let net = nice_scale(h.max(now_s, |s| s.rx.max(s.tx))) as f32;
+        line(&|s| Some(s.rx as f32 / net), MainWindow::set_lm_net_rx_path);
+        line(&|s| Some(s.tx as f32 / net), MainWindow::set_lm_net_tx_path);
+        ui.set_lm_disk_scale(rate(disk as u32).into());
+        ui.set_lm_net_scale(rate(net as u32).into());
+    });
+}
+
+fn clear_graphs(ui: &MainWindow) {
+    HIST.with_borrow_mut(|(h, _)| h.clear());
+    for set in [
+        MainWindow::set_lm_cpu_path,
+        MainWindow::set_lm_cpu_c_path,
+        MainWindow::set_lm_gpu_path,
+        MainWindow::set_lm_gpu_c_path,
+        MainWindow::set_lm_ram_path,
+        MainWindow::set_lm_disk_r_path,
+        MainWindow::set_lm_disk_w_path,
+        MainWindow::set_lm_net_rx_path,
+        MainWindow::set_lm_net_tx_path,
+    ] {
+        set(ui, "".into());
+    }
+}
+
+/// Tamamlanan geçmiş yanıtından çizgiler + ölçek etiketleri (sıcaklık geçmişi B: proto'da yok).
+fn draw_history(ui: &MainWindow) {
+    HQ.with_borrow(|h| {
+        let pts = &h.pts;
+        let mut buf = String::new();
+        let mut line = |f: &dyn Fn(&HistPoint) -> f32, set: fn(&MainWindow, slint::SharedString)| {
+            series_path(pts.iter().map(|p| p.as_ref().map(f)), &mut buf);
+            set(ui, buf.as_str().into());
+        };
+        let max = |f: &dyn Fn(&HistPoint) -> u32| pts.iter().flatten().map(f).max().unwrap_or(0);
+        line(&|p| p.cpu_avg as f32 / 10_000.0, MainWindow::set_hist_cpu_avg);
+        line(&|p| p.cpu_max as f32 / 10_000.0, MainWindow::set_hist_cpu_max);
+        let ram = if h.ram_total_mb > 0 { h.ram_total_mb } else { max(&|p| p.ram_mb).max(1) } as f32;
+        line(&|p| p.ram_mb as f32 / ram, MainWindow::set_hist_ram);
+        let disk = nice_scale(max(&|p| p.disk_r_kbps.max(p.disk_w_kbps))) as f32;
+        line(&|p| p.disk_r_kbps as f32 / disk, MainWindow::set_hist_disk_r);
+        line(&|p| p.disk_w_kbps as f32 / disk, MainWindow::set_hist_disk_w);
+        let net = nice_scale(max(&|p| p.net_rx_kbps.max(p.net_tx_kbps))) as f32;
+        line(&|p| p.net_rx_kbps as f32 / net, MainWindow::set_hist_net_rx);
+        line(&|p| p.net_tx_kbps as f32 / net, MainWindow::set_hist_net_tx);
+        ui.set_hist_ram_scale(format!("{:.0} GB", ram / 1024.0).into());
+        ui.set_hist_disk_scale(rate(disk as u32).into());
+        ui.set_hist_net_scale(rate(net as u32).into());
+        ui.set_hist_n(pts.len().max(1) as f32);
+        let off = OFFSET_S.get();
+        let to_ms = h.from_ms + h.step_ms * pts.len() as u64;
+        ui.set_hist_range(
+            format!("{} – {}", events::fmt_time(h.from_ms, off), events::fmt_time(to_ms, off)).into(),
+        );
+        let empty = pts.iter().all(Option::is_none);
+        ui.set_hist_status(if empty { "No data (LowMonitor service?)" } else { "" }.into());
+    });
+}
+
+/// Başa ekler; aynı saniye + tür + ad baştaki satırlarda varsa (geçmiş sorgusu sürerken gelen canlı olay) eklemez.
+fn prepend(ui: &MainWindow, v: &[EventItem]) {
+    let model = ui.get_events();
+    let Some(m) = model.as_any().downcast_ref::<VecModel<EventRow>>() else { return };
+    let off = OFFSET_S.get();
+    for e in v {
+        let row = EventRow {
+            time: events::fmt_time(e.ts_ms, off).into(),
+            kind: e.kind as i32,
+            name: e.name.as_str().into(),
+            value: events::value(e).into(),
+            desc: events::desc(e).into(),
+        };
+        if !m.iter().take(50).any(|r| r.time == row.time && r.kind == row.kind && r.name == row.name) {
+            m.insert(0, row);
+        }
+    }
+    while m.row_count() > EVENTS_MAX {
+        m.remove(m.row_count() - 1);
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
 fn unix_now() -> u64 {
@@ -389,20 +662,20 @@ fn show_ai(ui: &MainWindow, a: Option<&AiUsage>, now: u64) {
     ui.set_ai_state(1);
     // 3 = soluk (eski veri), aksi halde PC'nin seviyesi
     let level = |w: &Option<AiWindow>| if a.stale { 3 } else { w.map_or(0, |w| w.level.min(2) as i32) };
-    ui.set_ai_session(ai_line("Oturum", &a.session, now).into());
-    ui.set_ai_week(ai_line("Hafta", &a.week, now).into());
+    ui.set_ai_session(ai_line("Session", &a.session, now).into());
+    ui.set_ai_week(ai_line("Week", &a.week, now).into());
     ui.set_ai_session_level(level(&a.session));
     ui.set_ai_week_level(level(&a.week));
     ui.set_ai_note(ai_note(a, now).into());
 }
 
-/// "Oturum %33 · 4s16dk" (LM taskbar ile aynı biçim).
+/// "Session 33% · 4h16m" (LM taskbar ile aynı biçim).
 fn ai_line(label: &str, w: &Option<AiWindow>, now: u64) -> String {
     match w {
         None => format!("{label} —"),
         Some(w) => {
             let left = if w.resets_at == 0 { "—".into() } else { remaining(w.resets_at as i64 - now as i64) };
-            format!("{label} %{} · {left}", (w.pct + 5) / 10)
+            format!("{label} {}% · {left}", (w.pct + 5) / 10)
         }
     }
 }
@@ -412,22 +685,22 @@ fn ai_note(a: &AiUsage, now: u64) -> String {
     if !a.error.is_empty() {
         a.error.clone()
     } else if a.stale {
-        format!("eski · {} dk önce", now.saturating_sub(a.fetched_at) / 60)
+        format!("stale · {} min ago", now.saturating_sub(a.fetched_at) / 60)
     } else {
         a.source.clone()
     }
 }
 
-/// Geri sayım: "2g05s", "3s07dk", "12dk"; negatif → 0.
+/// Geri sayım: "2d05h", "3s07dk", "12dk"; negatif → 0.
 fn remaining(secs: i64) -> String {
     let s = secs.max(0);
     let (d, h, m) = (s / 86_400, s % 86_400 / 3600, s % 3600 / 60);
     if d > 0 {
-        format!("{d}g{h:02}s")
+        format!("{d}d{h:02}h")
     } else if h > 0 {
-        format!("{h}s{m:02}dk")
+        format!("{h}h{m:02}m")
     } else {
-        format!("{m}dk")
+        format!("{m}m")
     }
 }
 
@@ -463,18 +736,24 @@ mod tests {
     #[test]
     fn ai_text() {
         let w = Some(AiWindow { pct: 334, resets_at: 1_000 + 4 * 3600 + 16 * 60, level: 1 });
-        assert_eq!(ai_line("Oturum", &w, 1_000), "Oturum %33 · 4s16dk");
-        assert_eq!(ai_line("Hafta", &None, 0), "Hafta —");
+        assert_eq!(ai_line("Session", &w, 1_000), "Session 33% · 4h16m");
+        assert_eq!(ai_line("Week", &None, 0), "Week —");
         let w = Some(AiWindow { pct: 1000, resets_at: 0, level: 2 });
-        assert_eq!(ai_line("Hafta", &w, 0), "Hafta %100 · —");
-        assert_eq!(remaining(2 * 86_400 + 5 * 3600), "2g05s");
-        assert_eq!(remaining(-5), "0dk");
+        assert_eq!(ai_line("Week", &w, 0), "Week 100% · —");
+        assert_eq!(remaining(2 * 86_400 + 5 * 3600), "2d05h");
+        assert_eq!(remaining(-5), "0m");
         let mut a = AiUsage { fetched_at: 100, source: "OAuth".into(), ..Default::default() };
         assert_eq!(ai_note(&a, 200), "OAuth");
         a.stale = true;
-        assert_eq!(ai_note(&a, 100 + 720), "eski · 12 dk önce");
+        assert_eq!(ai_note(&a, 100 + 720), "stale · 12 min ago");
         a.error = "OAuth: token süresi dolmuş".into();
         assert_eq!(ai_note(&a, 0), "OAuth: token süresi dolmuş");
+    }
+
+    #[test]
+    fn tab_topics() {
+        assert_eq!(topics(0), TOPIC_EVENTS);
+        assert_eq!(topics(1) & (TOPIC_METRICS | TOPIC_SENSORS | TOPIC_AI), TOPIC_METRICS | TOPIC_SENSORS | TOPIC_AI);
     }
 
     #[test]
