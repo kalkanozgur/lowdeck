@@ -3,6 +3,7 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 
 ## [Unreleased]
 ### Eklendi
+- Telefon: sekmeler (Kontrol: ses/medya/kilit · Canlı: AI/PC/sensör/çekirdek/top); abonelik sekmeye göre (Kontrol'de metrik push yok). GPU % + °C, CPU/Disk °C, LowMonitor alarm bandı (her sekmede), "PC klavyesini kilitle" düğmesi (`C2S::Lock`).
 - Protokol: `TOPIC_SENSORS` + `S2C::Sensors` (GPU %, CPU/GPU/disk °C; ek varyant, sürüm 4; LM ADR-0033). `mock-server` sahte sensör üretir. Telefon arayüzü henüz kullanmıyor
 - Telefon: "AI" bölümü (PC'nin üstünde) — Claude oturum/hafta kullanımı, kalan süre, PC'nin tempo rengi. Protokol: `TOPIC_AI` + `S2C::Ai` (ek varyant, sürüm 4; LM ADR-0032)
 ### Kaldırıldı
@@ -10,6 +11,7 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 ### Değişti
 - Lisans: GPL-3.0-only → MIT OR Apache-2.0 (LowMonitor ile aynı; tek sahip). Slint Royalty-free 2.0 ile kullanılır, README'de atıf rozeti.
 ### Düzeltildi
+- Telefon: ayar paneli opak (alttaki ekran yazıların arasından görünüyordu).
 - Masaüstü Süreçler: arama kutusu (ad ya da PID); fare liste üzerindeyken ya da sonlandırma onayı beklenirken liste donar ("⏸ sabit"), seçim satır kaymasıyla kaçmaz; %0,05 altı CPU boş gösterilir.
 - Masaüstü Olaylar: alarm değeri yüzde olarak (59.2%), sistem olayında değer gizli; "Yenile" düğme görünümünde.
 - Masaüstü: Canlı kartları eşit genişlikte (değer değişince kayıyordu); Top-5 ve Süreçler CPU'su yumuşatılmış (EMA, ≈ 3 örnek), isimler her güncellemede yer değiştirmiyor.

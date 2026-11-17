@@ -10,7 +10,8 @@ mod discover;
 use config::AppConfig;
 use lowdeck_client::{Client, Config, Event};
 use lowdeck_proto::{
-    AiUsage, AiWindow, AudioCmd, MediaCmd, Metrics, Topics, TopItem, PROTO_VERSION, S2C, TOPIC_AI, TOPIC_METRICS,
+    AiUsage, AiWindow, AudioCmd, MediaCmd, Metrics, Sensors, Topics, TopItem, C2S, PROTO_VERSION, S2C, TOPIC_AI,
+    TOPIC_EVENTS, TOPIC_METRICS, TOPIC_SENSORS,
 };
 use slint::{Model, ModelRc, VecModel};
 use std::cell::{Cell, RefCell};
@@ -29,8 +30,14 @@ const LOCAL_ECHO_GUARD: Duration = Duration::from_millis(400);
 /// Bu süre dokunulmazsa siyah perde iner.
 const BLACKOUT_AFTER: Duration = Duration::from_secs(120);
 
-/// Ekran açıkken abone olunan konular: PC metrikleri + AI kullanımı (LM ADR-0032).
-const TOPICS: Topics = TOPIC_METRICS | TOPIC_AI;
+/// Ekran açıkken sekmeye göre konular: görünmeyen veri için PC de telefon da uyanmasın.
+/// Olaylar (alarm bandı) her sekmede; seyrek gelir.
+fn topics(tab: i32) -> Topics {
+    match tab {
+        1 => TOPIC_EVENTS | TOPIC_METRICS | TOPIC_SENSORS | TOPIC_AI, // Canlı
+        _ => TOPIC_EVENTS,                                            // Kontrol
+    }
+}
 
 /// Yaşam döngüsü kancası (true = öne geldi). `run` kurar, Android olay dinleyicisi çağırır.
 type ActiveHook = Box<dyn Fn(bool)>;
@@ -112,7 +119,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
             );
             // Perde inikken metrik yok: ekranda görünmeyen veri için PC de telefon da uyanmasın.
             if !ui.get_blackout() {
-                c.subscribe(TOPICS);
+                c.subscribe(topics(ui.get_tab()));
             }
             *client.borrow_mut() = Some(c);
         }
@@ -142,15 +149,31 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
         let client = client.clone();
         move || {
             idle.restart();
-            if let Some(ui) = weak.upgrade() {
-                ui.set_blackout(false);
-            }
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_blackout(false);
             if let Some(c) = client.borrow().as_ref() {
-                c.subscribe(TOPICS); // değişmediyse gönderilmez
+                c.subscribe(topics(ui.get_tab())); // değişmediyse gönderilmez
             }
         }
     };
     ui.global::<Activity>().on_poke(poke.clone());
+    {
+        let weak = ui.as_weak();
+        let client = client.clone();
+        ui.on_tab_changed(move || {
+            if let (Some(ui), Some(c)) = (weak.upgrade(), client.borrow().as_ref()) {
+                c.subscribe(topics(ui.get_tab()));
+            }
+        });
+    }
+    {
+        let client = client.clone();
+        ui.on_lock(move || {
+            if let Some(c) = client.borrow().as_ref() {
+                c.send(&C2S::Lock);
+            }
+        });
+    }
 
     // --- Yaşam döngüsü: arka planda bağlantı yok (sıfır ağ trafiği) ---
     {
@@ -330,7 +353,10 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
             ui.set_status(format!("Koptu: {reason}").into());
             ui.set_lm_state(0);
             ui.set_ai_state(0);
+            ui.set_alarms("".into());
         }
+        Event::Msg(S2C::Alarms(a)) => ui.set_alarms(a.join(", ").into()),
+        Event::Msg(S2C::Sensors(s)) => show_sensors(ui, &s),
         Event::Msg(S2C::Audio(a)) => {
             if last_local_edit.lock().unwrap().elapsed() >= LOCAL_ECHO_GUARD {
                 ui.set_volume(a.volume as f32);
@@ -374,6 +400,13 @@ fn show_metrics(ui: &MainWindow, m: &Metrics) {
     ui.set_lm_net(format!("↓ {}  ↑ {}", rate(m.net_rx_kbps), rate(m.net_tx_kbps)).into());
     let cores = m.cores.iter().map(|&c| c as f32 / 200.0).collect();
     set_vec(ui.get_lm_cores(), cores, |v| ui.set_lm_cores(v));
+}
+
+fn show_sensors(ui: &MainWindow, s: &Sensors) {
+    let c = |v: Option<i16>| v.map_or("—".into(), |v| format!("{v}°"));
+    let gpu = s.gpu_pct.map_or("—".into(), |p| format!("{p}%"));
+    ui.set_lm_gpu(format!("{gpu}  {}", c(s.gpu_c)).into());
+    ui.set_lm_temp(format!("CPU {}  Disk {}", c(s.cpu_c), c(s.disk_c)).into());
 }
 
 fn unix_now() -> u64 {
@@ -475,6 +508,12 @@ mod tests {
         assert_eq!(ai_note(&a, 100 + 720), "eski · 12 dk önce");
         a.error = "OAuth: token süresi dolmuş".into();
         assert_eq!(ai_note(&a, 0), "OAuth: token süresi dolmuş");
+    }
+
+    #[test]
+    fn tab_topics() {
+        assert_eq!(topics(0), TOPIC_EVENTS);
+        assert_eq!(topics(1) & (TOPIC_METRICS | TOPIC_SENSORS | TOPIC_AI), TOPIC_METRICS | TOPIC_SENSORS | TOPIC_AI);
     }
 
     #[test]
