@@ -13,7 +13,7 @@ Kullanıcı kararı (2026-11-18): telefon lowmon-ui'daki her şeyi göstersin. P
 
 Kısıtlar: `MAX_FRAME` 4096 B, enum'lara yalnız sona ekleme, sürekli iş yalnız abone varken, kill telefonda iki aşamalı onay (kullanıcı kararı).
 
-## Karar (öneri)
+## Karar
 1. **Sıcaklık geçmişi:** `C2S::QueryTempHistory { from_ms, to_ms, points }` → `S2C::TempHistory { from_ms, step_ms, points: Vec<Option<TempPoint>> }`, boş parça = bitti (`History` ile aynı akış). `TempPoint { cpu_c: Option<i16>, gpu_pct: Option<u8>, gpu_c: Option<i16>, disk_c_max: Option<i16> }` (dakika kayıtlarından kova ortalaması, disk = max; lowmon-ui `temp_buckets`). Telefon Geçmiş'te `QueryHistory` ile birlikte gönderir.
 2. **Süreçler:** `TOPIC_PROCS = 16`; görünüm `C2S::ProcView { sort: u8 /*0 CPU, 1 RAM*/, filter: String }` (ad/PID içerir, ≤ 32 karakter). Abone varken deck 2 s'de bir tarar, sıralar, süzer ve **ilk 50**'yi gönderir: `S2C::Procs { total: u16, items: Vec<ProcItem> }`. `ProcItem { pid: u32, ctime: i64, name: String /*≤ 32*/, cpu: u16 /*0.01 %*/, ws_mb: u32, protected: bool }` → en kötü ≈ 50 × 56 B ≈ 2,8 KB < `MAX_FRAME` (test). Abone yoksa tarama yok (ADR-0006).
    - **Kill:** `C2S::Kill { pid, ctime }` → `S2C::KillResult { pid, code: i32 }`. Yetki = token (ek ayar yok). `ctime` PID yeniden kullanımına karşı (lowmon-ui `kill_now`). `protected` ve UAC gereken süreç telefondan sonlandırılmaz (`code` = erişim reddi). Onay telefonda iki aşamalı.

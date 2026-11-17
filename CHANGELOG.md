@@ -3,6 +3,7 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 
 ## [Unreleased]
 ### Eklendi
+- Protokol (ADR-0009, ek varyantlar, sürüm 4): `QueryTempHistory`/`TempHistory`, `TOPIC_PROCS` + `ProcView`/`Procs` (ilk 50), `Kill`/`KillResult`, `QueryAiReport`/`AiReport`. Sunucu tarafı LowMonitor'da; mock-server bunlara `Unsupported` döner.
 - Telefon: yatay tam ekran (durum çubuğu gizli), solda sekme şeridi: Kontrol (ses/medya/"PC klavyesini kilitle") · Canlı (AI bandı, CPU/GPU/RAM/disk/ağ kartları + 5 dk grafikleri, °C, çekirdekler, top-5) · Olaylar (son 24 sa) · Geçmiş (1 sa/6 sa/24 sa/7 g). LowMonitor alarm bandı her sekmede. Abonelik sekmeye göre: metrik yalnız Canlı'da. Arayüz İngilizce (lowmon-ui ile aynı metinler), kart/grafik ölçüleri lowmon-ui'a yakın.
 - Protokol: `TOPIC_SENSORS` + `S2C::Sensors` (GPU %, CPU/GPU/disk °C; ek varyant, sürüm 4; LM ADR-0033). `mock-server` sahte sensör üretir. Telefon arayüzü henüz kullanmıyor
 - Telefon: "AI" bölümü (PC'nin üstünde) — Claude oturum/hafta kullanımı, kalan süre, PC'nin tempo rengi. Protokol: `TOPIC_AI` + `S2C::Ai` (ek varyant, sürüm 4; LM ADR-0032)
