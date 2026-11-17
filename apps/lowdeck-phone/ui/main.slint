@@ -209,6 +209,7 @@ export component MainWindow inherits Window {
 
         if root.tab == 0: VerticalLayout {
         spacing: 12px;
+        alignment: start; // fazla yükseklik satırlar arasına dağılmasın
         // --- Ses ---
         Text { text: "SES"; color: Theme.dim; font-size: 13px; }
         Text {
@@ -285,6 +286,7 @@ export component MainWindow inherits Window {
 
         if root.tab == 1: VerticalLayout {
         spacing: 12px;
+        alignment: start; // fazla yükseklik satırlar arasına dağılmasın
         // --- AI (Claude kullanımı) ---
         Rectangle { height: 8px; }
         HorizontalLayout {
