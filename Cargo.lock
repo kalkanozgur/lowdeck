@@ -2648,6 +2648,7 @@ dependencies = [
 name = "lowdeck-phone"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "lowdeck-client",
  "lowdeck-proto",
  "slint",

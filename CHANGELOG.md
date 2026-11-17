@@ -3,7 +3,7 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 
 ## [Unreleased]
 ### Eklendi
-- Telefon: sekmeler (Kontrol: ses/medya/kilit · Canlı: AI/PC/sensör/çekirdek/top); abonelik sekmeye göre (Kontrol'de metrik push yok). GPU % + °C, CPU/Disk °C, LowMonitor alarm bandı (her sekmede), "PC klavyesini kilitle" düğmesi (`C2S::Lock`).
+- Telefon: yatay tam ekran (durum çubuğu gizli), solda sekme şeridi: Kontrol (ses/medya/"PC klavyesini kilitle") · Canlı (AI bandı, CPU/GPU/RAM/disk/ağ kartları + 5 dk grafikleri, °C, çekirdekler, top-5) · Olaylar (son 24 sa) · Geçmiş (1 sa/6 sa/24 sa/7 g). LowMonitor alarm bandı her sekmede. Abonelik sekmeye göre: metrik yalnız Canlı'da.
 - Protokol: `TOPIC_SENSORS` + `S2C::Sensors` (GPU %, CPU/GPU/disk °C; ek varyant, sürüm 4; LM ADR-0033). `mock-server` sahte sensör üretir. Telefon arayüzü henüz kullanmıyor
 - Telefon: "AI" bölümü (PC'nin üstünde) — Claude oturum/hafta kullanımı, kalan süre, PC'nin tempo rengi. Protokol: `TOPIC_AI` + `S2C::Ai` (ek varyant, sürüm 4; LM ADR-0032)
 ### Kaldırıldı
