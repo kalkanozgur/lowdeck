@@ -47,6 +47,11 @@ pub enum C2S {
     Kill { pid: u32, ctime: i64 },
     /// AI raporu: 0 son oturum, 1 bugün, 2 bu hafta. Yanıt `S2C::AiReport`.
     QueryAiReport { view: u8 },
+    // ---- ADR-0010 (ek varyantlar, v4) ----
+    /// PC AI ayarı (`ai.toml`) oku. Yanıt `S2C::AiConfig`.
+    QueryAiConfig,
+    /// `ai.toml`'a yaz (yalnız değişen alanlar, yorumlar korunur) + tray yeniden yükler. Yanıt `S2C::AiConfig`.
+    SetAiConfig(AiConfig),
 }
 
 pub type Topics = u8;
@@ -114,6 +119,40 @@ pub enum S2C {
     KillResult { pid: u32, code: i32 },
     /// `QueryAiReport` yanıtı (tek çerçeve; listeler sunucuda kırpılır).
     AiReport(AiReport),
+    // ---- ADR-0010 ----
+    /// `QueryAiConfig` / `SetAiConfig` yanıtı: dosyadaki geçerli ayar; `error` boş değilse yazılmadı (≤ `AI_TEXT_MAX`).
+    AiConfig { cfg: AiConfig, error: String },
+}
+
+/// LM `ai.toml`'un telefondan değişen kısmı (ADR-0010; taskbar ve renkler hariç).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct AiConfig {
+    /// 0 Türkçe, 1 İngilizce
+    pub lang: u8,
+    /// Sorgu aralığı, s (30..=86 400)
+    pub refresh_sec: u32,
+    /// 0 auto, 1 OAuth, 2 Web (session)
+    pub auth: u8,
+    /// Her sorguyu CSV'ye yaz
+    pub csv_log: bool,
+    /// Rapor için oturum dökümü sayısı (1..=200)
+    pub report_sessions: u16,
+}
+
+impl AiConfig {
+    /// LM `lowmon-ui` Ayarlar ile aynı sınırlar; telefon kaydetmeden, sunucu yazmadan önce denetler.
+    pub fn check(&self) -> Result<(), String> {
+        if self.lang > 1 || self.auth > 2 {
+            return Err("invalid choice".into());
+        }
+        if !(30..=86_400).contains(&self.refresh_sec) {
+            return Err("refresh_sec: 30–86400".into());
+        }
+        if !(1..=200).contains(&self.report_sessions) {
+            return Err("report_sessions: 1–200".into());
+        }
+        Ok(())
+    }
 }
 
 /// Sıcaklık kovası (tray dakika kayıtları, LM ADR-0035): ort.; disk = kovadaki en yüksek. `None` = yok.
@@ -555,12 +594,28 @@ mod tests {
             C2S::ProcView { sort: 1, filter: n(PROC_FILTER_MAX) },
             C2S::Kill { pid: 7, ctime: -1 },
             C2S::QueryAiReport { view: 2 },
+            C2S::QueryAiConfig,
+            C2S::SetAiConfig(AiConfig { lang: 1, refresh_sec: 180, auth: 2, csv_log: true, report_sessions: 30 }),
         ] {
             let mut w = Vec::new();
             write_frame(&mut w, &m).unwrap();
             let got: C2S = read_frame(&mut &w[..], &mut buf).unwrap();
             assert_eq!(got, m);
         }
+    }
+
+    #[test]
+    fn ai_config() {
+        let ok = AiConfig { lang: 0, refresh_sec: 30, auth: 0, csv_log: false, report_sessions: 200 };
+        assert!(ok.check().is_ok());
+        assert!(AiConfig { refresh_sec: 29, ..ok.clone() }.check().is_err());
+        assert!(AiConfig { report_sessions: 0, ..ok.clone() }.check().is_err());
+        assert!(AiConfig { auth: 3, ..ok.clone() }.check().is_err());
+        let m = S2C::AiConfig { cfg: ok, error: "x".repeat(AI_TEXT_MAX) };
+        let mut w = Vec::new();
+        write_frame(&mut w, &m).unwrap();
+        let mut buf = [0u8; MAX_FRAME];
+        assert_eq!(read_frame::<_, S2C>(&mut &w[..], &mut buf).unwrap(), m);
     }
 
     #[test]
