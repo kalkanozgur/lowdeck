@@ -27,7 +27,6 @@ global Icons {
     out property <image> next: @image-url("icons/next.svg");
     out property <image> volume: @image-url("icons/volume.svg");
     out property <image> volume-off: @image-url("icons/volume-off.svg");
-    out property <image> settings: @image-url("icons/settings.svg");
 }
 
 // Her dokunuş boşta sayacını sıfırlar (Rust: tek-atışlık Timer::restart).
@@ -294,12 +293,11 @@ export component MainWindow inherits Window {
     in property <[AiSessRow]> airep-sessions;
     callback query-ai-report(int);
 
-    // --- Sekmeler: 0 Kontrol, 1 Canlı, 2 Olaylar, 3 Geçmiş, 4 Süreçler, 5 AI. Abonelik sekmeye göre (Rust `topics`). ---
+    // --- Sekmeler: 0 Kontrol, 1 Canlı, 2 Olaylar, 3 Geçmiş, 4 Süreçler, 5 AI, 6 Ayarlar. Abonelik sekmeye göre (Rust `topics`). ---
     in-out property <int> tab: 0;
     callback tab-changed();
 
     // --- Ayarlar ---
-    in-out property <bool> settings-open: false;
     in-out property <string> cfg-host;
     in-out property <string> cfg-port;
     in-out property <string> cfg-token;
@@ -322,7 +320,7 @@ export component MainWindow inherits Window {
 
     // Sekme geçişi: şerit düğmesi ve içerikte yatay kaydırma aynı yoldan (abonelik + sorgu).
     function go(i: int) {
-        if (i < 0 || i > 5) {
+        if (i < 0 || i > 6) {
             return;
         }
         root.tab = i;
@@ -338,12 +336,13 @@ export component MainWindow inherits Window {
 
     HorizontalLayout {
         // --- Sol sekme şeridi ---
+        // Dar: geçişin çoğu kaydırmayla (kullanıcı 2026-11-18)
         VerticalLayout {
-            width: 104px;
-            padding: 8px;
-            spacing: 6px;
+            width: 76px;
+            padding: 4px;
+            spacing: 4px;
             Rectangle {
-                height: 16px;
+                height: 14px;
                 Rectangle {
                     x: 4px;
                     width: 10px;
@@ -352,26 +351,20 @@ export component MainWindow inherits Window {
                     background: root.connected ? Theme.ok : Theme.warn;
                 }
             }
-            for l[i] in ["Control", "Live", "Events", "History", "Processes", "AI"]: DeckButton {
+            for l[i] in ["Control", "Live", "Events", "History", "Processes", "AI", "Settings"]: DeckButton {
                 label: l;
-                font-size: 14px;
-                min-height: 40px;
+                font-size: 12px;
+                min-height: 38px;
                 active: root.tab == i;
                 clicked => { root.go(i); }
             }
             Rectangle { vertical-stretch: 1; }
-            DeckButton {
-                icon: Icons.settings;
-                icon-size: 22px;
-                min-height: 40px;
-                clicked => { root.settings-open = !root.settings-open; }
-            }
         }
 
         // --- İçerik: sola kaydır → sonraki sekme, sağa → önceki (dikey liste kaydırması etkilenmez) ---
         swipe := SwipeGestureHandler {
             horizontal-stretch: 1;
-            handle-swipe-left: root.tab < 5;
+            handle-swipe-left: root.tab < 6;
             handle-swipe-right: root.tab > 0;
             swiped => {
                 Activity.poke();
@@ -791,67 +784,53 @@ export component MainWindow inherits Window {
                 }
             }
 
+            // --- Ayarlar: sol keşif | sağ bağlantı alanları ---
+            if root.tab == 6: HorizontalLayout {
+                spacing: 24px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 10px;
+                    alignment: start;
+                    Text { text: "Connection"; color: Theme.text; font-size: 20px; }
+                    DeckButton { label: "Find PC"; font-size: 18px; min-height: 48px; clicked => { root.discover(); } }
+                    Text { text: root.discover-status; color: Theme.dim; font-size: 13px; wrap: word-wrap; }
+                    for f in root.found: DeckButton {
+                        label: f.label;
+                        font-size: 14px;
+                        min-height: 44px;
+                        clicked => {
+                            root.cfg-host = f.host;
+                            root.cfg-port = f.port;
+                        }
+                    }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 6px;
+                    alignment: start;
+                    Text { text: "PC address (IP or name)"; color: Theme.dim; font-size: 13px; }
+                    LineEdit { text <=> root.cfg-host; placeholder-text: "192.168.1.x"; }
+                    Text { text: "Port"; color: Theme.dim; font-size: 13px; }
+                    LineEdit { text <=> root.cfg-port; input-type: number; }
+                    Text { text: "Token"; color: Theme.dim; font-size: 13px; }
+                    LineEdit { text <=> root.cfg-token; input-type: password; }
+                    if root.cfg-error != "": Text { text: root.cfg-error; color: Theme.warn; font-size: 13px; wrap: word-wrap; }
+                    DeckButton {
+                        label: "Save & connect";
+                        min-height: 48px;
+                        active: true;
+                        clicked => { root.cfg-error = root.save-settings() ? "" : root.cfg-error; }
+                    }
+                }
+            }
+
             if root.tab == 0 || root.tab == 2: Rectangle { vertical-stretch: 1; }
         }
         }
     }
 
-    // --- Ayarlar paneli (üstte, opak): sol keşif | sağ alanlar ---
-    if root.settings-open: Rectangle {
-        background: Theme.bg;
-        TouchArea { } // alttakine tıklamayı engelle
-        HorizontalLayout {
-            padding: 16px;
-            spacing: 24px;
-            VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 10px;
-                alignment: start;
-                Text { text: "Connection"; color: Theme.text; font-size: 22px; }
-                DeckButton { label: "Find PC"; font-size: 18px; min-height: 48px; clicked => { root.discover(); } }
-                Text { text: root.discover-status; color: Theme.dim; font-size: 13px; wrap: word-wrap; }
-                for f in root.found: DeckButton {
-                    label: f.label;
-                    font-size: 14px;
-                    min-height: 44px;
-                    clicked => {
-                        root.cfg-host = f.host;
-                        root.cfg-port = f.port;
-                    }
-                }
-            }
-            VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 6px;
-                alignment: start;
-                Text { text: "PC address (IP or name)"; color: Theme.dim; font-size: 13px; }
-                LineEdit { text <=> root.cfg-host; placeholder-text: "192.168.1.x"; }
-                Text { text: "Port"; color: Theme.dim; font-size: 13px; }
-                LineEdit { text <=> root.cfg-port; input-type: number; }
-                Text { text: "Token"; color: Theme.dim; font-size: 13px; }
-                LineEdit { text <=> root.cfg-token; input-type: password; }
-                if root.cfg-error != "": Text { text: root.cfg-error; color: Theme.warn; font-size: 13px; wrap: word-wrap; }
-                HorizontalLayout {
-                    spacing: 12px;
-                    padding-top: 6px;
-                    DeckButton { label: "Cancel"; min-height: 48px; clicked => { root.cfg-error = ""; root.settings-open = false; } }
-                    DeckButton {
-                        label: "Save";
-                        min-height: 48px;
-                        active: true;
-                        clicked => {
-                            if (root.save-settings()) {
-                                root.settings-open = false;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // --- Siyah perde (en üstte). Ayar paneli açıkken gösterilmez (yazarken kararmasın). ---
-    if root.blackout && !root.settings-open: Rectangle {
+    // --- Siyah perde (en üstte). Ayarlar sekmesinde gösterilmez (yazarken kararmasın). ---
+    if root.blackout && root.tab != 6: Rectangle {
         background: #000000;
         TouchArea { clicked => { Activity.poke(); } }
     }

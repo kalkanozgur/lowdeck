@@ -157,7 +157,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
             let Some(ui) = weak.upgrade() else { return };
             if c.host.is_empty() {
                 ui.set_status("PC address not set".into());
-                ui.set_settings_open(true);
+                ui.set_tab(6); // Ayarlar sekmesi
                 return;
             }
             let weak = weak.clone();

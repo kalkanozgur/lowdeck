@@ -3,7 +3,7 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 
 ## [Unreleased]
 ### Eklendi
-- Telefon: içerikte yatay kaydırma ile sekme değiştirme (sola → sonraki, sağa → önceki); şerit düğmeleriyle aynı abonelik/sorgu yolu
+- Telefon: içerikte yatay kaydırma ile sekme değiştirme (sola → sonraki, sağa → önceki); şerit düğmeleriyle aynı abonelik/sorgu yolu. Şerit daraldı (104 → 76 px); ⚙ paneli yerine **Settings** sekmesi
 - Telefon (ADR-0009): **Processes** sekmesi (CPU/RAM sıralama, ad/PID arama, ilk 50; "End" → "Confirm" iki aşamalı sonlandırma, korumalı süreçte düğme yok), **AI** sekmesi (son oturum / bugün / hafta: limit çizgileri, token dökümü, oturumlar), **History**'de CPU °C, GPU % + °C kartı, disk max °C. LowMonitor deck gerektirir (LM #63)
 - Protokol (ADR-0009, ek varyantlar, sürüm 4): `QueryTempHistory`/`TempHistory`, `TOPIC_PROCS` + `ProcView`/`Procs` (ilk 50), `Kill`/`KillResult`, `QueryAiReport`/`AiReport`. Sunucu tarafı LowMonitor'da; mock-server bunlara `Unsupported` döner.
 - Telefon: yatay tam ekran (durum çubuğu gizli), solda sekme şeridi: Kontrol (ses/medya/"PC klavyesini kilitle") · Canlı (AI bandı, CPU/GPU/RAM/disk/ağ kartları + 5 dk grafikleri, °C, çekirdekler, top-5) · Olaylar (son 24 sa) · Geçmiş (1 sa/6 sa/24 sa/7 g). LowMonitor alarm bandı her sekmede. Abonelik sekmeye göre: metrik yalnız Canlı'da. Arayüz İngilizce (lowmon-ui ile aynı metinler), kart/grafik ölçüleri lowmon-ui'a yakın.
