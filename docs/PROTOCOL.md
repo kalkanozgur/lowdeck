@@ -39,6 +39,8 @@ S → C  Media(MediaState)                 # tam durum
 | 9 | `ProcView` | `sort: u8` (0 CPU, 1 RAM), `filter: String` (≤ 32; ad/PID içerir) | `TOPIC_PROCS` görünümü (ADR-0009) |
 | 10 | `Kill` | `pid: u32, ctime: i64` | Süreç sonlandır; yanıt `KillResult`. Yetki = token; korumalı/UAC gereken → 5 (ADR-0009) |
 | 11 | `QueryAiReport` | `view: u8` (0 son oturum, 1 bugün, 2 hafta) | Yanıt `AiReport` (ADR-0009) |
+| 12 | `QueryAiConfig` | — | Yanıt `AiConfig` (ADR-0010) |
+| 13 | `SetAiConfig` | `AiConfig` | `ai.toml`'a yazar, tray yeniden yükler; yanıt `AiConfig` (ADR-0010) |
 
 8–11 ek varyant, `PROTO_VERSION` 4: eski sunucu çözemez → bağlantı düşer; **LM önce güncellenir**.
 
@@ -65,8 +67,9 @@ S → C  Media(MediaState)                 # tam durum
 | 14 | `Procs` | `total: u16, items: Vec<ProcItem>` (≤ 50, `TOPIC_PROCS`, ≈ 2 s): sunucuda sıralı + süzülmüş |
 | 15 | `KillResult` | `pid: u32, code: i32`: 0 = sonlandı, aksi Win32 hata kodu |
 | 16 | `AiReport` | `AiReport` (tek çerçeve): limit çizgileri + token dökümü + oturumlar |
+| 17 | `AiConfig` | `cfg: AiConfig, error: String` | Dosyadaki geçerli ayar; `error` boş değilse yazılmadı (≤ 120) |
 
-`TempPoint`: `cpu_c`, `gpu_c: Option<i16>` (°C, kova ort.), `gpu_pct: Option<u8>`, `disk_c_max: Option<i16>`. `ProcItem`: `pid: u32`, `ctime: i64` (sunucuya özgü, `Kill`'de geri), `name` (≤ 32), `cpu: u16` (0,01 %), `ws_mb: u32`, `protected: bool`. `AiReport`: `from_s, to_s: u64`, `session_line, week_line: Vec<Option<u16>>` (100 eşit kova, 0,1 %), `session_count: u16`, `request_count: u32`, `total_tokens: u64`, `groups: Vec<AiGroup { name, share: u16 (0,1 %), tokens: u64 }>` (≤ 8, ad sunucu dilinde), `sessions: Vec<AiSession { ended_at: u64 (0 = sürüyor), project, requests: u32, tokens: u64, top, top_share: u16 }>` (≤ 20). En kötü boyutlar test `adr0009_fit_frame` ile ≤ 4096 B.
+`TempPoint`: `cpu_c`, `gpu_c: Option<i16>` (°C, kova ort.), `gpu_pct: Option<u8>`, `disk_c_max: Option<i16>`. `ProcItem`: `pid: u32`, `ctime: i64` (sunucuya özgü, `Kill`'de geri), `name` (≤ 32), `cpu: u16` (0,01 %), `ws_mb: u32`, `protected: bool`. `AiReport`: `from_s, to_s: u64`, `session_line, week_line: Vec<Option<u16>>` (100 eşit kova, 0,1 %), `session_count: u16`, `request_count: u32`, `total_tokens: u64`, `groups: Vec<AiGroup { name, share: u16 (0,1 %), tokens: u64 }>` (≤ 8, ad sunucu dilinde), `sessions: Vec<AiSession { ended_at: u64 (0 = sürüyor), project, requests: u32, tokens: u64, top, top_share: u16 }>` (≤ 20). En kötü boyutlar test `adr0009_fit_frame` ile ≤ 4096 B. `AiConfig` (ADR-0010): `lang: u8` (0 tr, 1 en), `refresh_sec: u32` (30–86 400), `auth: u8` (0 auto, 1 OAuth, 2 Web), `csv_log: bool`, `report_sessions: u16` (1–200); sınırlar `AiConfig::check`.
 
 `AiUsage`: `session`, `week: Option<AiWindow>`, `fetched_at: u64` (Unix s), `stale: bool` (eski → soluk), `source`, `error: String` (≤ 120 karakter, sır yok). `AiWindow`: `pct: u16` (0,1 %; 1000 = %100), `resets_at: u64` (Unix s, 0 = bilinmiyor), `level: u8` (PC'nin tempo/eşik seviyesi: 0 normal, 1 uyarı, 2 kritik). Metin ve geri sayımı istemci kendi saatiyle üretir.
 

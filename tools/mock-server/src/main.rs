@@ -148,8 +148,13 @@ fn handle(stream: TcpStream, token: &str) -> Result<(), FrameError> {
             }
             C2S::Hello { .. } => write_frame(&mut wr, &S2C::Error(ErrorCode::Unsupported))?,
             C2S::Lock => println!("<< Lock"),
-            // ADR-0009 mesajları mock'ta yok: test gerçek LM tray ile (kullanıcı kararı 2026-11-18)
-            C2S::QueryTempHistory { .. } | C2S::ProcView { .. } | C2S::Kill { .. } | C2S::QueryAiReport { .. } => {
+            // ADR-0009/0010 mesajları mock'ta yok: test gerçek LM tray ile (kullanıcı kararı 2026-11-18)
+            C2S::QueryTempHistory { .. }
+            | C2S::ProcView { .. }
+            | C2S::Kill { .. }
+            | C2S::QueryAiReport { .. }
+            | C2S::QueryAiConfig
+            | C2S::SetAiConfig(_) => {
                 write_frame(&mut wr, &S2C::Error(ErrorCode::Unsupported))?
             }
         }
