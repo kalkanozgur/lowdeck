@@ -4,6 +4,7 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 ## [Unreleased]
 ### Eklendi
 - Telefon: içerikte yatay kaydırma ile sekme değiştirme (sola → sonraki, sağa → önceki); şerit düğmeleriyle aynı abonelik/sorgu yolu. Şerit daraldı (104 → 76 px); ⚙ paneli yerine **Settings** sekmesi
+- Telefon (ADR-0010): **Settings** sekmesinde "PC · AI": dil, kimlik (Auto/OAuth/Web), yenileme aralığı, rapor oturum sayısı, CSV log → "Save to PC" (PC `ai.toml`, yalnız değişen anahtar). LowMonitor deck gerektirir (LM #65)
 - Protokol (ADR-0010, ek varyantlar, sürüm 4): `QueryAiConfig` / `SetAiConfig(AiConfig)` → `S2C::AiConfig { cfg, error }`; PC `ai.toml` telefondan okunur/yazılır. Sunucu LowMonitor'da
 - Telefon (ADR-0009): **Processes** sekmesi (CPU/RAM sıralama, ad/PID arama, ilk 50; "End" → "Confirm" iki aşamalı sonlandırma, korumalı süreçte düğme yok), **AI** sekmesi (son oturum / bugün / hafta: limit çizgileri, token dökümü, oturumlar), **History**'de CPU °C, GPU % + °C kartı, disk max °C. LowMonitor deck gerektirir (LM #63)
 - Protokol (ADR-0009, ek varyantlar, sürüm 4): `QueryTempHistory`/`TempHistory`, `TOPIC_PROCS` + `ProcView`/`Procs` (ilk 50), `Kill`/`KillResult`, `QueryAiReport`/`AiReport`. Sunucu tarafı LowMonitor'da; mock-server bunlara `Unsupported` döner.

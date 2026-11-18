@@ -306,6 +306,16 @@ export component MainWindow inherits Window {
     in property <[FoundPc]> found;
     in property <string> discover-status;
     callback discover();
+    // PC AI ayarı (ADR-0010, `ai.toml`): sekmeye girince sorgulanır, "Save to PC" ile yazılır
+    in-out property <int> ai-lang: 0; // 0 TR, 1 EN
+    in-out property <int> ai-auth: 0; // 0 Auto, 1 OAuth, 2 Web
+    in-out property <string> ai-refresh;
+    in-out property <string> ai-report;
+    in-out property <bool> ai-csv: false;
+    in property <bool> aicfg-loaded: false;
+    in property <string> aicfg-status;
+    callback query-ai-config();
+    callback save-ai-config();
 
     // Boşta siyah perde: AMOLED pikselleri söner (burn-in + tüketim). Dokununca kalkar.
     in-out property <bool> blackout: false;
@@ -331,6 +341,9 @@ export component MainWindow inherits Window {
         }
         if (i == 5) {
             root.query-ai-report(root.airep-view);
+        }
+        if (i == 6) {
+            root.query-ai-config();
         }
     }
 
@@ -784,9 +797,9 @@ export component MainWindow inherits Window {
                 }
             }
 
-            // --- Ayarlar: sol keşif | sağ bağlantı alanları ---
+            // --- Ayarlar: keşif | bağlantı alanları | PC AI (ADR-0010) ---
             if root.tab == 6: HorizontalLayout {
-                spacing: 24px;
+                spacing: 16px;
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 10px;
@@ -820,6 +833,39 @@ export component MainWindow inherits Window {
                         min-height: 48px;
                         active: true;
                         clicked => { root.cfg-error = root.save-settings() ? "" : root.cfg-error; }
+                    }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 6px;
+                    alignment: start;
+                    Text { text: "PC · AI"; color: Theme.text; font-size: 20px; }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        for l[i] in ["TR", "EN"]: Chip { label: l; min-width: 48px; active: root.ai-lang == i; clicked => { root.ai-lang = i; } }
+                        Chip { label: "CSV log"; min-width: 80px; active: root.ai-csv; clicked => { root.ai-csv = !root.ai-csv; } }
+                    }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        for l[i] in ["Auto", "OAuth", "Web"]: Chip { label: l; min-width: 56px; active: root.ai-auth == i; clicked => { root.ai-auth = i; } }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        VerticalLayout {
+                            Text { text: "Refresh (s)"; color: Theme.dim; font-size: 13px; }
+                            LineEdit { text <=> root.ai-refresh; input-type: number; }
+                        }
+                        VerticalLayout {
+                            Text { text: "Report sessions"; color: Theme.dim; font-size: 13px; }
+                            LineEdit { text <=> root.ai-report; input-type: number; }
+                        }
+                    }
+                    Text { text: root.aicfg-status; color: Theme.dim; font-size: 13px; wrap: word-wrap; }
+                    DeckButton {
+                        label: "Save to PC";
+                        min-height: 44px;
+                        active: root.aicfg-loaded && root.connected;
+                        clicked => { if (root.aicfg-loaded && root.connected) { root.save-ai-config(); } }
                     }
                 }
             }

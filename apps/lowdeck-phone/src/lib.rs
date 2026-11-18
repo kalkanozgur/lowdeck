@@ -14,7 +14,7 @@ use config::AppConfig;
 use graph::{nice_scale, series_path, History, Sample};
 use lowdeck_client::{Client, Config, Event};
 use lowdeck_proto::{
-    AiUsage, AiWindow, AudioCmd, EventItem, HistPoint, MediaCmd, Metrics, ProcItem, Sensors,
+    AiConfig, AiUsage, AiWindow, AudioCmd, EventItem, HistPoint, MediaCmd, Metrics, ProcItem, Sensors,
     TempPoint, TopItem, Topics, C2S, HIST_POINTS_MAX, PROTO_VERSION, S2C, TOPIC_AI, TOPIC_EVENTS,
     TOPIC_METRICS, TOPIC_PROCS, TOPIC_SENSORS,
 };
@@ -85,6 +85,8 @@ thread_local! {
     static SEND: RefCell<Option<SendHook>> = const { RefCell::new(None) };
     /// Son süreç listesi: `Kill` için ctime + sonuç metni için ad.
     static PROCS: RefCell<Vec<ProcItem>> = const { RefCell::new(Vec::new()) };
+    /// `SetAiConfig` yanıtı bekleniyor: hatasız `AiConfig` gelirse "Saved".
+    static AICFG_SAVING: Cell<bool> = const { Cell::new(false) };
 }
 
 fn send(msg: &C2S) -> bool {
@@ -266,6 +268,28 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                 "Not connected to PC".into()
             };
             ui.set_procs_msg(msg.into());
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        ui.on_query_ai_config(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            AICFG_SAVING.set(false);
+            let sent = send(&C2S::QueryAiConfig);
+            ui.set_aicfg_status(if sent { "Loading…" } else { "Not connected to PC" }.into());
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        ui.on_save_ai_config(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let cfg = match ai_config_of(&ui) {
+                Ok(c) => c,
+                Err(e) => return ui.set_aicfg_status(e.into()),
+            };
+            let sent = send(&C2S::SetAiConfig(cfg));
+            AICFG_SAVING.set(sent);
+            ui.set_aicfg_status(if sent { "Saving…" } else { "Not connected to PC" }.into());
         });
     }
     {
@@ -513,6 +537,22 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
     r
 }
 
+/// Form → `AiConfig`; sayı değilse ya da sınır dışıysa kısa İngilizce hata.
+fn ai_config_of(ui: &MainWindow) -> Result<AiConfig, String> {
+    let num = |s: slint::SharedString, name: &str| {
+        s.trim().parse::<u32>().map_err(|_| format!("{name}: number expected"))
+    };
+    let cfg = AiConfig {
+        lang: ui.get_ai_lang().clamp(0, 1) as u8,
+        auth: ui.get_ai_auth().clamp(0, 2) as u8,
+        refresh_sec: num(ui.get_ai_refresh(), "Refresh")?,
+        report_sessions: num(ui.get_ai_report(), "Report sessions")?.min(u16::MAX as u32) as u16,
+        csv_log: ui.get_ai_csv(),
+    };
+    cfg.check()?;
+    Ok(cfg)
+}
+
 /// Ağ olayını UI'a uygular (event loop thread'inde çalışır).
 fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
     match ev {
@@ -527,6 +567,9 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
             if ui.get_tab() == 4 {
                 send_view(ui);
             }
+            if ui.get_tab() == 6 {
+                send(&C2S::QueryAiConfig);
+            }
         }
         Event::Disconnected { reason } => {
             ui.set_connected(false);
@@ -540,6 +583,8 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
             HQ.with_borrow_mut(|h| (h.pending, h.tpending) = (0, 0)); // yanıtlar kayboldu
             ui.set_hist_status("".into());
             ui.set_airep_status("".into());
+            ui.set_aicfg_loaded(false); // eski değerle yazma olmasın; sekmeye dönünce yeniden sorgu
+            AICFG_SAVING.set(false);
         }
         Event::Msg(S2C::Alarms(a)) => ui.set_alarms(a.join(", ").into()),
         Event::Msg(S2C::Sensors(s)) => {
@@ -633,6 +678,21 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
             );
         }
         Event::Msg(S2C::AiReport(r)) => draw_ai_report(ui, &r),
+        Event::Msg(S2C::AiConfig { cfg, error }) => {
+            ui.set_ai_lang(cfg.lang.into());
+            ui.set_ai_auth(cfg.auth.into());
+            ui.set_ai_refresh(cfg.refresh_sec.to_string().into());
+            ui.set_ai_report(cfg.report_sessions.to_string().into());
+            ui.set_ai_csv(cfg.csv_log);
+            ui.set_aicfg_loaded(true);
+            let saved = AICFG_SAVING.replace(false);
+            let msg = match (error.is_empty(), saved) {
+                (false, _) => error,
+                (true, true) => "Saved".into(),
+                (true, false) => String::new(),
+            };
+            ui.set_aicfg_status(msg.into());
+        }
         Event::Msg(S2C::Audio(a)) => {
             if last_local_edit.lock().unwrap().elapsed() >= LOCAL_ECHO_GUARD {
                 ui.set_volume(a.volume as f32);
