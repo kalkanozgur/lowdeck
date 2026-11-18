@@ -348,40 +348,76 @@ export component MainWindow inherits Window {
     }
 
     HorizontalLayout {
-        // --- Sol sekme şeridi ---
-        // Dar: geçişin çoğu kaydırmayla (kullanıcı 2026-11-18)
-        VerticalLayout {
+        // --- Sol sekme çarkı: aktif sekme ortada, komşular küçülüp söner; yukarı kaydır → sonraki ---
+        // Animasyon yok (tüketim kuralı): konumlar yalnız `tab` değişince yeniden hesaplanır.
+        wheel := SwipeGestureHandler {
             width: 76px;
-            padding: 4px;
-            spacing: 4px;
-            Rectangle {
-                height: 14px;
-                Rectangle {
-                    x: 4px;
-                    width: 10px;
-                    height: 10px;
-                    border-radius: 5px;
-                    background: root.connected ? Theme.ok : Theme.warn;
-                }
-            }
-            for l[i] in ["Control", "Live", "Events", "History", "Processes", "AI", "Settings"]: DeckButton {
-                label: l;
-                font-size: 12px;
-                min-height: 38px;
-                active: root.tab == i;
-                clicked => { root.go(i); }
-            }
-            Rectangle { vertical-stretch: 1; }
-        }
-
-        // --- İçerik: sola kaydır → sonraki sekme, sağa → önceki (dikey liste kaydırması etkilenmez) ---
-        swipe := SwipeGestureHandler {
-            horizontal-stretch: 1;
-            handle-swipe-left: root.tab < 6;
-            handle-swipe-right: root.tab > 0;
+            handle-swipe-up: root.tab < 6;
+            handle-swipe-down: root.tab > 0;
             swiped => {
                 Activity.poke();
-                root.go(self.current-position.x < self.pressed-position.x ? root.tab + 1 : root.tab - 1);
+                root.go(self.current-position.y < self.pressed-position.y ? root.tab + 1 : root.tab - 1);
+            }
+            Rectangle {
+                // bağlantı noktası
+                x: 8px;
+                y: 8px;
+                width: 10px;
+                height: 10px;
+                border-radius: 5px;
+                background: root.connected ? Theme.ok : Theme.warn;
+            }
+            for l[i] in ["Control", "Live", "Events", "History", "Processes", "AI", "Settings"]: row := Rectangle {
+                property <int> d: abs(i - root.tab);
+                x: 0;
+                width: parent.width;
+                height: 44px;
+                y: (parent.height - self.height) / 2 + (i - root.tab) * 50px;
+                visible: self.d <= 2;
+                // aktif satırın arka planı + sol vurgu çizgisi
+                background: self.d == 0 ? Theme.surface : transparent;
+                border-radius: 8px;
+                if row.d == 0: Rectangle { x: 0; y: 8px; width: 3px; height: parent.height - 16px; background: Theme.accent; border-radius: 1.5px; }
+                Text {
+                    text: l;
+                    color: row.d == 0 ? Theme.accent : Theme.dim;
+                    opacity: row.d == 0 ? 1 : (row.d == 1 ? 0.75 : 0.4);
+                    font-size: row.d == 0 ? 14px : (row.d == 1 ? 12px : 10px);
+                    font-weight: row.d == 0 ? 700 : 400;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                TouchArea { clicked => { Activity.poke(); root.go(i); } }
+            }
+            // uçlarda yön ipucu: daha sekme var
+            if root.tab > 0: Path {
+                x: (parent.width - 12px) / 2;
+                y: 26px;
+                width: 12px;
+                height: 7px;
+                commands: "M 0 7 L 6 0 L 12 7 Z";
+                fill: Theme.dim;
+            }
+            if root.tab < 6: Path {
+                x: (parent.width - 12px) / 2;
+                y: parent.height - 15px;
+                width: 12px;
+                height: 7px;
+                commands: "M 0 0 L 6 7 L 12 0 Z";
+                fill: Theme.dim;
+            }
+        }
+
+        // --- İçerik: listesiz sekmelerde (Control, Live, History, Settings) dikey kaydırma da sekme değiştirir;
+        // Events/Processes/AI listeleri normal kayar (kullanıcı kararı 2026-11-18) ---
+        swipe := SwipeGestureHandler {
+            horizontal-stretch: 1;
+            property <bool> free: root.tab == 0 || root.tab == 1 || root.tab == 3 || root.tab == 6;
+            handle-swipe-up: self.free && root.tab < 6;
+            handle-swipe-down: self.free && root.tab > 0;
+            swiped => {
+                Activity.poke();
+                root.go(self.current-position.y < self.pressed-position.y ? root.tab + 1 : root.tab - 1);
             }
         VerticalLayout {
             width: swipe.width;

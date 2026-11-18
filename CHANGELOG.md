@@ -3,6 +3,7 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 
 ## [Unreleased]
 ### Eklendi
+- Telefon: sol şerit **çark** oldu (aktif sekme ortada, komşular küçülüp söner, uçta ▲▼); sekme değişimi dikey kaydırmayla — şeritte her zaman, içerikte yalnız Control/Live/History/Settings'te (listeler normal kayar). Yatay kaydırma kalktı
 - Telefon: içerikte yatay kaydırma ile sekme değiştirme (sola → sonraki, sağa → önceki); şerit düğmeleriyle aynı abonelik/sorgu yolu. Şerit daraldı (104 → 76 px); ⚙ paneli yerine **Settings** sekmesi
 - Telefon (ADR-0010): **Settings** sekmesinde "PC · AI": dil, kimlik (Auto/OAuth/Web), yenileme aralığı, rapor oturum sayısı, CSV log → "Save to PC" (PC `ai.toml`, yalnız değişen anahtar). LowMonitor deck gerektirir (LM #65)
 - Protokol (ADR-0010, ek varyantlar, sürüm 4): `QueryAiConfig` / `SetAiConfig(AiConfig)` → `S2C::AiConfig { cfg, error }`; PC `ai.toml` telefondan okunur/yazılır. Sunucu LowMonitor'da
