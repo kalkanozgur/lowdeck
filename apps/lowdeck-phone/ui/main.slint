@@ -118,18 +118,20 @@ component Spark inherits Rectangle {
     }
     // Dokunurken: dikey çizgi + tarih/değer etiketi; parmak kalkınca kaybolur (timer yok)
     ta := TouchArea { enabled: root.kind >= 0; }
+    // Parmak kart dışına kayarsa kenarda kalır
+    property <length> mx: clamp(ta.mouse-x, 0px, root.width - 1px);
     if ta.pressed: Rectangle {
-        x: clamp(ta.mouse-x, 0, root.width - 1px);
+        x: root.mx;
         width: 1px;
         background: Theme.dim;
     }
     if ta.pressed: tip := Rectangle {
-        property <string> s: Hover.text(root.kind, ta.mouse-x / max(1px, root.width), Hover.rev);
+        property <string> s: Hover.text(root.kind, root.mx / max(1px, root.width), Hover.rev);
         visible: self.s != "";
         width: t.preferred-width + 12px;
         height: t.preferred-height + 6px;
         // Sağ yarıda çizginin soluna geçer (kart dışına taşmasın)
-        x: ta.mouse-x > root.width / 2 ? max(0px, ta.mouse-x - self.width - 6px) : min(root.width - self.width, ta.mouse-x + 6px);
+        x: root.mx > root.width / 2 ? max(0px, root.mx - self.width - 6px) : min(root.width - self.width, root.mx + 6px);
         y: 0;
         background: Theme.bg;
         border-color: Theme.disabled;
