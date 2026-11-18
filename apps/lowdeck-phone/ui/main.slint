@@ -320,6 +320,22 @@ export component MainWindow inherits Window {
     callback lock(); // PC tuş kilidi (cat-lock, ADR-0008)
     callback save-settings() -> bool; // false: doğrulama hatası, cfg-error dolu
 
+    // Sekme geçişi: şerit düğmesi ve içerikte yatay kaydırma aynı yoldan (abonelik + sorgu).
+    function go(i: int) {
+        if (i < 0 || i > 5) {
+            return;
+        }
+        root.tab = i;
+        root.procs-armed = -1;
+        root.tab-changed();
+        if (i == 3) {
+            root.query-history(root.hist-span);
+        }
+        if (i == 5) {
+            root.query-ai-report(root.airep-view);
+        }
+    }
+
     HorizontalLayout {
         // --- Sol sekme şeridi ---
         VerticalLayout {
@@ -341,17 +357,7 @@ export component MainWindow inherits Window {
                 font-size: 14px;
                 min-height: 40px;
                 active: root.tab == i;
-                clicked => {
-                    root.tab = i;
-                    root.procs-armed = -1;
-                    root.tab-changed();
-                    if (i == 3) {
-                        root.query-history(root.hist-span);
-                    }
-                    if (i == 5) {
-                        root.query-ai-report(root.airep-view);
-                    }
-                }
+                clicked => { root.go(i); }
             }
             Rectangle { vertical-stretch: 1; }
             DeckButton {
@@ -362,8 +368,18 @@ export component MainWindow inherits Window {
             }
         }
 
-        // --- İçerik ---
+        // --- İçerik: sola kaydır → sonraki sekme, sağa → önceki (dikey liste kaydırması etkilenmez) ---
+        swipe := SwipeGestureHandler {
+            horizontal-stretch: 1;
+            handle-swipe-left: root.tab < 5;
+            handle-swipe-right: root.tab > 0;
+            swiped => {
+                Activity.poke();
+                root.go(self.current-position.x < self.pressed-position.x ? root.tab + 1 : root.tab - 1);
+            }
         VerticalLayout {
+            width: swipe.width;
+            height: swipe.height;
             padding: 12px;
             padding-left: 4px;
             spacing: 8px;
@@ -776,6 +792,7 @@ export component MainWindow inherits Window {
             }
 
             if root.tab == 0 || root.tab == 2: Rectangle { vertical-stretch: 1; }
+        }
         }
     }
 
