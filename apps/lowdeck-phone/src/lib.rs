@@ -131,6 +131,8 @@ fn android_main(app: slint::android::AndroidApp) {
 pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::PlatformError> {
     let ui = MainWindow::new()?;
     OFFSET_S.set(events::local_offset_s());
+    ui.global::<Hover>()
+        .on_text(|kind, frac, _rev| tip_text(kind, frac, OFFSET_S.get()).into());
     let event_rows = Rc::new(VecModel::<EventRow>::default());
     ui.set_events(ModelRc::from(event_rows.clone()));
     let cfg_path = data_dir.map(|d| d.join("lowdeck.cfg"));
@@ -813,6 +815,83 @@ fn graphs(ui: &MainWindow, m: &Metrics, now_s: u64) {
         ui.set_lm_disk_scale(rate(disk as u32).into());
         ui.set_lm_net_scale(rate(net as u32).into());
     });
+    bump_tip(ui);
+}
+
+fn bump_tip(ui: &MainWindow) {
+    let g = ui.global::<Hover>();
+    g.set_rev(g.get_rev().wrapping_add(1));
+}
+
+/// Grafik dokunma etiketi: zaman + o andaki seriler (LM `hover_text`). `kind`: 0–4 Canlı
+/// (CPU, RAM, disk, ağ, GPU), 10–14 Geçmiş (aynı sıra). Veri yoksa "" (etiket gizlenir).
+fn tip_text(kind: i32, frac: f32, off: i64) -> String {
+    let pct = |v: f32| format!("{:.0}%", v * 100.0);
+    let c = |t: Option<i16>| t.map(|t| format!("  {t} °C")).unwrap_or_default();
+    if kind < 10 {
+        return HIST.with_borrow(|(h, _)| {
+            let Some(s) = h.at(frac) else {
+                return String::new();
+            };
+            let v = match kind {
+                0 => format!("{}{}", pct(s.cpu as f32 / 10_000.0), c(s.cpu_c)),
+                4 => format!(
+                    "{}{}",
+                    s.gpu_pct.map_or("—".into(), |p| format!("{p}%")),
+                    c(s.gpu_c)
+                ),
+                1 => pct(s.ram),
+                2 => format!("R {}  W {}", rate(s.dr), rate(s.dw)),
+                _ => format!("↓ {}  ↑ {}", rate(s.rx), rate(s.tx)),
+            };
+            // fmt_time: "MM-DD HH:MM:SS"
+            format!("{}\n{v}", &events::fmt_time(s.ts_s * 1000, off)[6..])
+        });
+    }
+    HQ.with_borrow(|h| {
+        let n = h.pts.len();
+        if n == 0 {
+            return String::new();
+        }
+        // Kova i, viewbox'ta x = i (genişlik n)
+        let i = ((frac.max(0.0) * n as f32) as usize).min(n - 1);
+        let Some(p) = &h.pts[i] else {
+            return String::new();
+        };
+        let t = h.temps.get(i).copied().flatten();
+        let v = match kind {
+            10 => format!(
+                "avg {}  max {}{}",
+                pct(p.cpu_avg as f32 / 10_000.0),
+                pct(p.cpu_max as f32 / 10_000.0),
+                c(t.and_then(|t| t.cpu_c))
+            ),
+            14 => format!(
+                "{}{}",
+                t.and_then(|t| t.gpu_pct)
+                    .map_or("—".into(), |v| format!("{v}%")),
+                c(t.and_then(|t| t.gpu_c))
+            ),
+            11 => format!("{:.1} GB", p.ram_mb as f32 / 1024.0),
+            12 => format!(
+                "R {}  W {}{}",
+                rate(p.disk_r_kbps),
+                rate(p.disk_w_kbps),
+                t.and_then(|t| t.disk_c_max)
+                    .map(|v| format!("  max {v} °C"))
+                    .unwrap_or_default()
+            ),
+            _ => format!("↓ {}  ↑ {}", rate(p.net_rx_kbps), rate(p.net_tx_kbps)),
+        };
+        // "11-17 14:32–14:33": tarih 7 g aralığında gerekli; dakikadan kısa kovada saniye de
+        let end = if h.step_ms < 60_000 { 14 } else { 11 };
+        let from = h.from_ms + h.step_ms * i as u64;
+        format!(
+            "{}–{}\n{v}",
+            &events::fmt_time(from, off)[..end],
+            &events::fmt_time(from + h.step_ms, off)[6..end]
+        )
+    })
 }
 
 fn clear_graphs(ui: &MainWindow) {
@@ -902,6 +981,7 @@ fn draw_history(ui: &MainWindow) {
             .into(),
         );
     });
+    bump_tip(ui);
 }
 
 /// Sıcaklık/GPU geçmişi: 0..100 eksen (°C ve %), LM Geçmiş ile aynı.
@@ -924,6 +1004,7 @@ fn draw_temps(ui: &MainWindow) {
         let disk = h.temps.iter().flatten().filter_map(|t| t.disk_c_max).max();
         ui.set_hist_disk_c(disk.map_or(String::new(), |v| format!("max {v} °C")).into());
     });
+    bump_tip(ui);
 }
 
 fn draw_ai_report(ui: &MainWindow, r: &lowdeck_proto::AiReport) {
