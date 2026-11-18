@@ -38,6 +38,15 @@ pub enum C2S {
     /// Tuş kilidi (ADR-0008): agent cat-lock kısayolunu (Pause) gönderir. Yanıt/durum yok; açma yalnız klavyeden kod.
     /// Ek varyant: v4 istemcileri etkilenmez, PROTO_VERSION aynı. Eski agent bu çerçeveyi çözemez → bağlantı düşer.
     Lock,
+    // ---- ADR-0009 (ek varyantlar, v4; eski LM çözemez → LM önce güncellenir) ----
+    /// Sıcaklık/GPU geçmişi `[from_ms, to_ms)`, `points` kova (≤ `HIST_POINTS_MAX`). Yanıt: `S2C::TempHistory` parçaları, boş = bitti.
+    QueryTempHistory { from_ms: u64, to_ms: u64, points: u16 },
+    /// `TOPIC_PROCS` görünümü: sıralama (0 CPU, 1 RAM) + süzgeç (ad ya da PID içerir, ≤ `PROC_FILTER_MAX`; "" = hepsi).
+    ProcView { sort: u8, filter: String },
+    /// Süreç sonlandır; `ctime` PID yeniden kullanımına karşı (`ProcItem::ctime`). Yanıt `S2C::KillResult`.
+    Kill { pid: u32, ctime: i64 },
+    /// AI raporu: 0 son oturum, 1 bugün, 2 bu hafta. Yanıt `S2C::AiReport`.
+    QueryAiReport { view: u8 },
 }
 
 pub type Topics = u8;
@@ -49,6 +58,8 @@ pub const TOPIC_EVENTS: Topics = 2;
 pub const TOPIC_AI: Topics = 4;
 /// LowMonitor tray sensörleri (GPU %, CPU/GPU/disk °C; LM ADR-0033): abonelikte son okuma, sonra ~2 s'de bir `S2C::Sensors`.
 pub const TOPIC_SENSORS: Topics = 8;
+/// Süreç listesi (`S2C::Procs`, ≈ 2 s); abone yokken sunucu taramaz (ADR-0009).
+pub const TOPIC_PROCS: Topics = 16;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum AudioCmd {
@@ -94,6 +105,86 @@ pub enum S2C {
     Ai(Option<AiUsage>),
     /// `TOPIC_SENSORS`: tray sensör okuması (~2 s). Ek varyant: yalnız abone olana gider.
     Sensors(Sensors),
+    // ---- ADR-0009 ----
+    /// `QueryTempHistory` yanıt parçası (≤ `HIST_PER_FRAME` kova), `History` ile aynı kova düzeni; boş = bitti.
+    TempHistory { from_ms: u64, step_ms: u64, points: Vec<Option<TempPoint>> },
+    /// `TOPIC_PROCS`: görünüme göre sıralı/süzülmüş ilk `PROCS_MAX` süreç; `total` = süzgeçten geçen tümü.
+    Procs { total: u16, items: Vec<ProcItem> },
+    /// `Kill` sonucu: 0 = sonlandı, aksi Win32 hata kodu (5 = erişim reddi: korumalı / yükseltme gerekli).
+    KillResult { pid: u32, code: i32 },
+    /// `QueryAiReport` yanıtı (tek çerçeve; listeler sunucuda kırpılır).
+    AiReport(AiReport),
+}
+
+/// Sıcaklık kovası (tray dakika kayıtları, LM ADR-0035): ort.; disk = kovadaki en yüksek. `None` = yok.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TempPoint {
+    pub cpu_c: Option<i16>,
+    pub gpu_pct: Option<u8>,
+    pub gpu_c: Option<i16>,
+    pub disk_c_max: Option<i16>,
+}
+
+/// Bir `Procs` çerçevesindeki en fazla süreç; ad `PROC_NAME_MAX`'ta kırpılır → `MAX_FRAME` aşılmaz (test).
+pub const PROCS_MAX: usize = 50;
+pub const PROC_NAME_MAX: usize = 32;
+pub const PROC_FILTER_MAX: usize = 32;
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct ProcItem {
+    pub pid: u32,
+    /// Oluşturma zamanı (FILETIME, sunucuya özgü); `Kill`'de geri gönderilir.
+    pub ctime: i64,
+    pub name: String,
+    /// CPU, 0.01 % (tüm çekirdekler = %100).
+    pub cpu: u16,
+    pub ws_mb: u32,
+    /// Sistem/korumalı: telefon sonlandırma düğmesini göstermez.
+    pub protected: bool,
+}
+
+/// AI raporu sınırları (tek çerçeve, test).
+pub const AI_LINE_POINTS: usize = 100;
+pub const AI_GROUPS_MAX: usize = 8;
+pub const AI_SESSIONS_MAX: usize = 20;
+pub const AI_NAME_MAX: usize = 32;
+
+/// lowmon-ui AI sekmesi verisi; metin/biçim istemcide (token sayısı ham).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct AiReport {
+    /// Grafik aralığı, Unix s; çizgiler `[from_s, to_s]`'ye eşit aralıklı `AI_LINE_POINTS` kova.
+    pub from_s: u64,
+    pub to_s: u64,
+    /// Oturum / hafta limiti, 0.1 %; `None` = kovada örnek yok.
+    pub session_line: Vec<Option<u16>>,
+    pub week_line: Vec<Option<u16>>,
+    pub session_count: u16,
+    pub request_count: u32,
+    pub total_tokens: u64,
+    /// Token dökümü, büyükten küçüğe (≤ `AI_GROUPS_MAX`). Ad sunucu dilinde etiket.
+    pub groups: Vec<AiGroup>,
+    /// Oturumlar, yeniden eskiye (≤ `AI_SESSIONS_MAX`).
+    pub sessions: Vec<AiSession>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct AiGroup {
+    pub name: String,
+    /// Pay, 0.1 %.
+    pub share: u16,
+    pub tokens: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct AiSession {
+    /// Bitiş, Unix s; 0 = sürüyor.
+    pub ended_at: u64,
+    pub project: String,
+    pub requests: u32,
+    pub tokens: u64,
+    /// En büyük grup etiketi + payı (0.1 %); boş = yok.
+    pub top: String,
+    pub top_share: u16,
 }
 
 /// LowMonitor tray sensörleri (`lowmon-sensors`). `None` = kaynak yok / okunamadı.
@@ -429,6 +520,49 @@ mod tests {
     }
 
     /// Sensör çerçevesi küçük kalır, gidiş-dönüş aynı; `None` alanlar korunur.
+    #[test]
+    fn adr0009_fit_frame() {
+        let n = |k: usize| "x".repeat(k);
+        let wire = |m: &S2C| {
+            let mut w = Vec::new();
+            write_frame(&mut w, m).unwrap();
+            w.len()
+        };
+        let p = ProcItem { pid: u32::MAX, ctime: i64::MAX, name: n(PROC_NAME_MAX), cpu: u16::MAX, ws_mb: u32::MAX, protected: true };
+        let procs = S2C::Procs { total: u16::MAX, items: vec![p; PROCS_MAX] };
+        assert!(wire(&procs) <= MAX_FRAME, "procs {} bayt", wire(&procs));
+        let t = TempPoint { cpu_c: Some(i16::MIN), gpu_pct: Some(u8::MAX), gpu_c: Some(i16::MIN), disk_c_max: Some(i16::MIN) };
+        let th = S2C::TempHistory { from_ms: u64::MAX, step_ms: u64::MAX, points: vec![Some(t); HIST_PER_FRAME] };
+        assert!(wire(&th) <= MAX_FRAME, "temp {} bayt", wire(&th));
+        let g = AiGroup { name: n(AI_NAME_MAX), share: u16::MAX, tokens: u64::MAX };
+        let se = AiSession { ended_at: u64::MAX, project: n(AI_NAME_MAX), requests: u32::MAX, tokens: u64::MAX, top: n(AI_NAME_MAX), top_share: u16::MAX };
+        let r = S2C::AiReport(AiReport {
+            from_s: u64::MAX,
+            to_s: u64::MAX,
+            session_line: vec![Some(u16::MAX); AI_LINE_POINTS],
+            week_line: vec![Some(u16::MAX); AI_LINE_POINTS],
+            session_count: u16::MAX,
+            request_count: u32::MAX,
+            total_tokens: u64::MAX,
+            groups: vec![g; AI_GROUPS_MAX],
+            sessions: vec![se; AI_SESSIONS_MAX],
+        });
+        assert!(wire(&r) <= MAX_FRAME, "ai report {} bayt", wire(&r));
+        // C2S yuvarlak dönüş
+        let mut buf = [0u8; MAX_FRAME];
+        for m in [
+            C2S::QueryTempHistory { from_ms: 1, to_ms: 2, points: 3 },
+            C2S::ProcView { sort: 1, filter: n(PROC_FILTER_MAX) },
+            C2S::Kill { pid: 7, ctime: -1 },
+            C2S::QueryAiReport { view: 2 },
+        ] {
+            let mut w = Vec::new();
+            write_frame(&mut w, &m).unwrap();
+            let got: C2S = read_frame(&mut &w[..], &mut buf).unwrap();
+            assert_eq!(got, m);
+        }
+    }
+
     #[test]
     fn sensors_roundtrip() {
         let msg = S2C::Sensors(Sensors { gpu_pct: Some(100), gpu_c: Some(-40), cpu_c: None, disk_c: Some(i16::MAX) });
