@@ -32,6 +32,10 @@
 - [ ] Telefondan "PC'yi bul" + firewall (UDP 47811 / TCP 47810) gerçek Wi-Fi'da
 - [ ] `lowmon-proto` rev'i LowMonitor sürümleriyle birlikte güncelle (pipe `PROTO` artarsa agent `servis: BadHello` loglar)
 
+- [ ] Telefon adı Android'de sabit `"toco"` → cihaz modelinden al (2026-11-18, M21 de `toco` görünüyor)
+- [ ] Settings sekmesi: durum satırı / bulunan PC etiketi sütunları kaydırıyor → sabit genişlik
+- [ ] Telefondan `ai.toml` değer değiştirme + tray reload cihazda doğrula
+
 ## Fikirler
 - Rafta (kullanıcı, 2026-11-15): Süreçler'de öncelik / EcoQoS / affinity
 - Tuş kilidi (Faz 5, ADR-0008): telefonda kilit düğmesi; biyometri/PIN ile PC kilidini açma + durum

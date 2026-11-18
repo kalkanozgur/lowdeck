@@ -177,7 +177,7 @@ Renderer seçimi (femtovg/skia/software) ölçümle karşılaştırılır.
 
 ### Faz 5 — Tuş kilidi ([ADR-0008](docs/kararlar/ADR-0008-tus-kilidi.md))
 - [x] Karar: (c) agent `SendInput(VK_PAUSE)` → cat-lock-cpp (yönetici) kısayolu. `C2S::Lock` sona eklendi, `cli l`. Normal yetkiden kilit + enjekte rakamla açma ölçüldü.
-- [ ] Telefon: kilit düğmesi.
+- [x] Telefon: kilit düğmesi (Control sekmesi, 2026-11-18).
 - [ ] Telefonda parmak izi / PIN → PC'de kilit açma + kilit durumu (yöntem o adımda kartla sorulur). Test kodu hiçbir dosyaya/commit'e yazılmaz.
 
 ## 7. Bağlam
