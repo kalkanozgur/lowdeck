@@ -30,6 +30,13 @@ global Icons {
 }
 
 // Her dokunuş boşta sayacını sıfırlar (Rust: tek-atışlık Timer::restart).
+// Grafiğe dokununca (LM lowmon-ui hover'ı gibi, ADR yok): metin Rust'ta (`tip_text`); `rev` yeni veriyle artar,
+// parmak sabitken de etiket güncellenir. Hesap yalnız dokunurken yapılır.
+export global Hover {
+    in property <int> rev;
+    pure callback text(int, float, int) -> string;
+}
+
 export global Activity {
     callback poke();
 }
@@ -90,6 +97,7 @@ component Spark inherits Rectangle {
     in property <color> cc: Theme.temp;
     in property <string> scale; // "" = sabit 0..%100 ölçek, etiket yok
     in property <float> vb: 300; // Canlı 300 s, Geçmiş kova sayısı
+    in property <int> kind: -1; // dokunma etiketi (`tip_text`); -1 = yok
     for p in [{ d: root.a, c: root.ca }, { d: root.b, c: root.cb }, { d: root.c, c: root.cc }]: Path {
         width: 100%;
         height: 100%;
@@ -108,6 +116,33 @@ component Spark inherits Rectangle {
         color: Theme.dim;
         font-size: 10px;
     }
+    // Dokunurken: dikey çizgi + tarih/değer etiketi; parmak kalkınca kaybolur (timer yok)
+    ta := TouchArea { enabled: root.kind >= 0; }
+    if ta.pressed: Rectangle {
+        x: clamp(ta.mouse-x, 0, root.width - 1px);
+        width: 1px;
+        background: Theme.dim;
+    }
+    if ta.pressed: tip := Rectangle {
+        property <string> s: Hover.text(root.kind, ta.mouse-x / max(1px, root.width), Hover.rev);
+        visible: self.s != "";
+        width: t.preferred-width + 12px;
+        height: t.preferred-height + 6px;
+        // Sağ yarıda çizginin soluna geçer (kart dışına taşmasın)
+        x: ta.mouse-x > root.width / 2 ? max(0px, ta.mouse-x - self.width - 6px) : min(root.width - self.width, ta.mouse-x + 6px);
+        y: 0;
+        background: Theme.bg;
+        border-color: Theme.disabled;
+        border-width: 1px;
+        border-radius: 4px;
+        t := Text {
+            x: 6px;
+            y: 3px;
+            text: tip.s;
+            color: Theme.text;
+            font-size: 12px;
+        }
+    }
 }
 
 // Canlı kartı: etiket + değer + 5 dk çizgisi.
@@ -120,6 +155,7 @@ component Stat inherits Rectangle {
     in property <color> color-a: Theme.accent;
     in property <color> color-b: Theme.accent2;
     in property <string> scale;
+    in property <int> kind: -1;
     background: Theme.surface;
     border-radius: 8px;
     // Eşit genişlik: değer metni uzunluğu kartı büyütmesin.
@@ -144,6 +180,7 @@ component Stat inherits Rectangle {
             ca: root.live ? root.color-a : Theme.disabled;
             cb: root.live ? root.color-b : Theme.disabled;
             scale: root.scale;
+            kind: root.kind;
         }
     }
 }
@@ -158,6 +195,7 @@ component HistCard inherits Rectangle {
     in property <color> cb: Theme.accent2;
     in property <string> scale;
     in property <float> vb;
+    in property <int> kind: -1;
     background: Theme.surface;
     border-radius: 8px;
     preferred-width: 0px;
@@ -168,7 +206,7 @@ component HistCard inherits Rectangle {
         padding: 10px;
         spacing: 4px;
         Text { text: root.label; color: Theme.dim; font-size: 12px; overflow: elide; }
-        Spark { vertical-stretch: 1; a: root.a; b: root.b; c: root.c; ca: root.ca; cb: root.cb; scale: root.scale; vb: root.vb; }
+        Spark { vertical-stretch: 1; a: root.a; b: root.b; c: root.c; ca: root.ca; cb: root.cb; scale: root.scale; vb: root.vb; kind: root.kind; }
     }
 }
 
@@ -553,6 +591,7 @@ export component MainWindow inherits Window {
                     // Sıcaklık çizgisi aynı 0..100 ekseninde (°C), turuncu
                     Stat {
                         label: "CPU  5 min";
+                        kind: 0;
                         value: root.lm-cpu + (root.lm-cpu-c != "" ? "  " + root.lm-cpu-c : "");
                         live: root.lm-live;
                         path-a: root.lm-cpu-path;
@@ -561,16 +600,18 @@ export component MainWindow inherits Window {
                     }
                     Stat {
                         label: "GPU  5 min";
+                        kind: 4;
                         value: root.lm-gpu + (root.lm-gpu-c != "" ? "  " + root.lm-gpu-c : "");
                         live: root.lm-live;
                         path-a: root.lm-gpu-path;
                         path-b: root.lm-gpu-c-path;
                         color-b: Theme.temp;
                     }
-                    Stat { label: "RAM  5 min"; value: root.lm-ram; live: root.lm-live; path-a: root.lm-ram-path; }
+                    Stat { label: "RAM  5 min"; kind: 1; value: root.lm-ram; live: root.lm-live; path-a: root.lm-ram-path; }
                     Stat {
                         label: "DISK  R / W" + (root.lm-disk-c != "" ? "  · " + root.lm-disk-c : "");
                         value: root.lm-disk;
+                        kind: 2;
                         live: root.lm-live;
                         path-a: root.lm-disk-r-path;
                         path-b: root.lm-disk-w-path;
@@ -579,6 +620,7 @@ export component MainWindow inherits Window {
                     Stat {
                         label: "NET  ↓ / ↑";
                         value: root.lm-net;
+                        kind: 3;
                         live: root.lm-live;
                         path-a: root.lm-net-rx-path;
                         path-b: root.lm-net-tx-path;
@@ -665,15 +707,15 @@ export component MainWindow inherits Window {
                     spacing: 8px;
                     vertical-stretch: 1;
                     // Max önce (soluk), ortalama üstte
-                    HistCard { label: "CPU  avg / max · °C"; a: root.hist-cpu-max; ca: #2f6f8a; b: root.hist-cpu-avg; cb: Theme.accent; c: root.hist-cpu-c; vb: root.hist-n; }
-                    HistCard { label: "GPU  % · °C"; a: root.hist-gpu; b: root.hist-gpu-c; cb: Theme.temp; vb: root.hist-n; }
-                    HistCard { label: "RAM"; a: root.hist-ram; scale: root.hist-ram-scale; vb: root.hist-n; }
+                    HistCard { kind: 10; label: "CPU  avg / max · °C"; a: root.hist-cpu-max; ca: #2f6f8a; b: root.hist-cpu-avg; cb: Theme.accent; c: root.hist-cpu-c; vb: root.hist-n; }
+                    HistCard { kind: 14; label: "GPU  % · °C"; a: root.hist-gpu; b: root.hist-gpu-c; cb: Theme.temp; vb: root.hist-n; }
+                    HistCard { kind: 11; label: "RAM"; a: root.hist-ram; scale: root.hist-ram-scale; vb: root.hist-n; }
                 }
                 HorizontalLayout {
                     spacing: 8px;
                     vertical-stretch: 1;
-                    HistCard { label: "DISK  R / W" + (root.hist-disk-c != "" ? "  · " + root.hist-disk-c : ""); a: root.hist-disk-r; b: root.hist-disk-w; scale: root.hist-disk-scale; vb: root.hist-n; }
-                    HistCard { label: "NET  ↓ / ↑"; a: root.hist-net-rx; b: root.hist-net-tx; ca: Theme.ok; scale: root.hist-net-scale; vb: root.hist-n; }
+                    HistCard { kind: 12; label: "DISK  R / W" + (root.hist-disk-c != "" ? "  · " + root.hist-disk-c : ""); a: root.hist-disk-r; b: root.hist-disk-w; scale: root.hist-disk-scale; vb: root.hist-n; }
+                    HistCard { kind: 13; label: "NET  ↓ / ↑"; a: root.hist-net-rx; b: root.hist-net-tx; ca: Theme.ok; scale: root.hist-net-scale; vb: root.hist-n; }
                 }
                 HorizontalLayout {
                     spacing: 6px;

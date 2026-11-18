@@ -1,5 +1,5 @@
 //! Canlı grafik geçmişi (5 dk ring buffer) + SVG path üretimi. LowMonitor `lowmon-ui/src/history.rs`
-//! kopyası (hover ve sıcaklık kovaları hariç); init sonrası tahsis yok, path `String`'i yeniden kullanılır.
+//! kopyası (sıcaklık kovaları hariç); init sonrası tahsis yok, path `String`'i yeniden kullanılır.
 
 use std::fmt::Write;
 
@@ -58,6 +58,15 @@ impl History {
 
     fn recent(&self, now_s: u64) -> impl Iterator<Item = &Sample> {
         self.iter().filter(move |s| now_s.saturating_sub(s.ts_s) <= WINDOW_S)
+    }
+
+    /// Dokunma etiketi: grafikte `frac` (0 = sol, 1 = sağ = son örnek) konumuna en yakın örnek; boşlukta `None`.
+    pub fn at(&self, frac: f32) -> Option<&Sample> {
+        let now = self.iter().last()?.ts_s;
+        let t = now as f32 - WINDOW_S as f32 * (1.0 - frac.clamp(0.0, 1.0));
+        self.recent(now)
+            .min_by(|a, b| (a.ts_s as f32 - t).abs().total_cmp(&(b.ts_s as f32 - t).abs()))
+            .filter(|s| (s.ts_s as f32 - t).abs() <= GAP_S as f32)
     }
 
     /// Penceredeki en büyük değer (oto-ölçek için).
@@ -131,6 +140,18 @@ mod tests {
 
     fn s(ts_s: u64, cpu: u16) -> Sample {
         Sample { ts_s, cpu, ..Default::default() }
+    }
+
+    #[test]
+    fn at_nearest_sample() {
+        let mut h = History::default();
+        assert!(h.at(1.0).is_none());
+        for t in [1000, 1001, 1002, 1100] {
+            h.push(s(t, t as u16));
+        }
+        assert_eq!(h.at(1.0).unwrap().ts_s, 1100); // sağ kenar = son örnek
+        assert_eq!(h.at(1.0 - 98.0 / WINDOW_S as f32).unwrap().ts_s, 1002);
+        assert!(h.at(0.5).is_none()); // 1002–1100 boşluğu
     }
 
     fn cpu(s: &Sample) -> Option<f32> {
