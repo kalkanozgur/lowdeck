@@ -14,7 +14,7 @@ use config::AppConfig;
 use graph::{nice_scale, series_path, History, Sample};
 use lowdeck_client::{Client, Config, Event};
 use lowdeck_proto::{
-    AiConfig, AiUsage, AiWindow, AudioCmd, EventItem, HistPoint, MediaCmd, Metrics, ProcItem, Sensors,
+    AiConfig, AiUsage, AiWindow, AudioCmd, Beacon, EventItem, HistPoint, MediaCmd, Metrics, ProcItem, Sensors,
     TempPoint, TopItem, Topics, C2S, HIST_POINTS_MAX, PROTO_VERSION, S2C, TOPIC_AI, TOPIC_EVENTS,
     TOPIC_METRICS, TOPIC_PROCS, TOPIC_SENSORS,
 };
@@ -34,6 +34,14 @@ const LOCAL_ECHO_GUARD: Duration = Duration::from_millis(400);
 
 /// Bu süre dokunulmazsa siyah perde iner.
 const BLACKOUT_AFTER: Duration = Duration::from_secs(120);
+/// Perde inikken yalnız seyrek push'lar: alarm kenarı (PC eşikleri, sıcaklık dahil) + AI değişimi.
+/// Uyandırma kararı bunlardan; metrik/sensör akışı yok.
+const DARK_TOPICS: Topics = TOPIC_EVENTS | TOPIC_AI;
+/// Perde inikken PC meşgulse (`busy`) bu aralıkla `PEEK_FOR` kadar açılır.
+const PEEK_EVERY: Duration = Duration::from_secs(600);
+const PEEK_FOR: Duration = Duration::from_secs(15);
+/// Üst üste bu kadar kopuştan sonra (geri çekilme 1+2+4 s ≈ 7 s) keşif; sonra her 5 kopuşta bir (≈ 2,5 dk).
+const REDISCOVER_AFTER: u32 = 3;
 
 /// Ekran açıkken sekmeye göre konular: görünmeyen veri için PC de telefon da uyanmasın.
 /// Olaylar (alarm bandı + Olaylar listesi) her sekmede; seyrek gelir.
@@ -68,6 +76,8 @@ struct HistRx {
 /// Yaşam döngüsü kancası (true = öne geldi). `run` kurar, Android olay dinleyicisi çağırır.
 type ActiveHook = Box<dyn Fn(bool)>;
 type SendHook = Box<dyn Fn(&C2S) -> bool>;
+type NameHook = Box<dyn Fn(&str)>;
+type FoundHook = Box<dyn Fn(Vec<Beacon>)>;
 
 thread_local! {
     static ON_ACTIVE: RefCell<Option<ActiveHook>> = const { RefCell::new(None) };
@@ -87,6 +97,39 @@ thread_local! {
     static PROCS: RefCell<Vec<ProcItem>> = const { RefCell::new(Vec::new()) };
     /// `SetAiConfig` yanıtı bekleniyor: hatasız `AiConfig` gelirse "Saved".
     static AICFG_SAVING: Cell<bool> = const { Cell::new(false) };
+    /// Perdeyi kaldır (alarm kalktı); `run` kurar.
+    static WAKE: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
+    /// Bağlanınca sunucu adı (= keşif adı) ayara; `run` kurar.
+    static REMEMBER: RefCell<Option<NameHook>> = const { RefCell::new(None) };
+    /// Keşif sonucu: kayıtlı PC yeni adresteyse oraya bağlan; `run` kurar.
+    static REHOME: RefCell<Option<FoundHook>> = const { RefCell::new(None) };
+    /// Son bağlantıdan beri üst üste kopuş.
+    static FAILS: Cell<u32> = const { Cell::new(0) };
+}
+
+/// AI penceresi PC'de uyarı seviyesinde ya da ≥ %80.
+fn ai_busy(a: &AiUsage) -> bool {
+    [a.session, a.week].iter().flatten().any(|w| w.level >= 1 || w.pct >= 800)
+}
+
+/// Arada açılış için "PC meşgul": aktif alarm ya da AI limiti yakın.
+fn busy(ui: &MainWindow) -> bool {
+    ui.get_connected()
+        && (!ui.get_alarms().is_empty() || LAST_AI.with_borrow(|a| a.as_ref().is_some_and(ai_busy)))
+}
+
+/// Arka planda keşif (~1,5 s); sonuç UI thread'inde `REHOME`'a.
+fn rediscover() {
+    std::thread::spawn(|| {
+        let found = discover::discover(discover::WAIT);
+        let _ = slint::invoke_from_event_loop(move || {
+            REHOME.with_borrow(|f| {
+                if let Some(f) = f.as_ref() {
+                    f(found)
+                }
+            })
+        });
+    });
 }
 
 fn send(msg: &C2S) -> bool {
@@ -185,45 +228,68 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                 },
             );
             // Perde inikken metrik yok: ekranda görünmeyen veri için PC de telefon da uyanmasın.
-            if !ui.get_blackout() {
-                c.subscribe(topics(ui.get_tab()));
-            }
+            c.subscribe(if ui.get_blackout() { DARK_TOPICS } else { topics(ui.get_tab()) });
             *client.borrow_mut() = Some(c);
         }
     };
     let connect = Rc::new(connect);
     connect(&current.borrow());
 
-    // --- Boşta siyah perde: tek-atışlık timer, her dokunuşta yeniden kurulur ---
+    // --- Boşta siyah perde: tek-atışlık timer; dokunuş / alarm 120 s, arada açılış 15 s kurar ---
     let idle = Rc::new(slint::Timer::default());
-    {
+    let go_dark: Rc<dyn Fn()> = {
         let weak = ui.as_weak();
         let client = client.clone();
-        idle.start(slint::TimerMode::SingleShot, BLACKOUT_AFTER, move || {
+        Rc::new(move || {
             if let Some(ui) = weak.upgrade() {
                 ui.set_blackout(true);
                 ui.set_lm_state(0);
                 ui.set_ai_state(0);
             }
             if let Some(c) = client.borrow().as_ref() {
-                c.subscribe(0);
+                c.subscribe(DARK_TOPICS);
             }
-        });
-    }
-    let poke = {
+        })
+    };
+    let arm = {
         let idle = idle.clone();
+        Rc::new(move |d: Duration| {
+            let f = go_dark.clone();
+            idle.start(slint::TimerMode::SingleShot, d, move || f());
+        })
+    };
+    arm(BLACKOUT_AFTER);
+    // Perdeyi kaldır, `d` sonra yeniden indir.
+    let show_for = {
         let weak = ui.as_weak();
         let client = client.clone();
-        move || {
-            idle.restart();
+        Rc::new(move |d: Duration| {
+            arm(d);
             let Some(ui) = weak.upgrade() else { return };
             ui.set_blackout(false);
             if let Some(c) = client.borrow().as_ref() {
                 c.subscribe(topics(ui.get_tab())); // değişmediyse gönderilmez
             }
-        }
+        })
+    };
+    let poke = {
+        let show_for = show_for.clone();
+        move || show_for(BLACKOUT_AFTER)
     };
     ui.global::<Activity>().on_poke(poke.clone());
+    WAKE.set(Some(Box::new(poke.clone())));
+    // Perde inikken PC meşgulse arada kısa açılış (boş PC'de karanlık kalır).
+    let peek = slint::Timer::default();
+    {
+        let weak = ui.as_weak();
+        peek.start(slint::TimerMode::Repeated, PEEK_EVERY, move || {
+            if let Some(ui) = weak.upgrade() {
+                if ui.get_blackout() && busy(&ui) {
+                    show_for(PEEK_FOR);
+                }
+            }
+        });
+    }
     {
         let weak = ui.as_weak();
         let client = client.clone();
@@ -464,6 +530,37 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
         });
     }
 
+    // --- Otomatik yeniden bağlanma: PC adı hatırlanır, kopunca keşifle yeni adresi bulunur ---
+    {
+        let (current, path) = (current.clone(), cfg_path.clone());
+        REMEMBER.set(Some(Box::new(move |server: &str| {
+            let mut c = current.borrow_mut();
+            if c.name != server {
+                c.name = server.to_string();
+                config::save(path.as_deref(), &c);
+            }
+        })));
+    }
+    {
+        let (weak, connect, current, path) = (ui.as_weak(), connect.clone(), current.clone(), cfg_path.clone());
+        REHOME.set(Some(Box::new(move |found: Vec<Beacon>| {
+            let Some(ui) = weak.upgrade() else { return };
+            if ui.get_connected() {
+                return; // keşif sürerken bağlandı
+            }
+            let mut c = current.borrow().clone();
+            // Aynı adres bulunduysa sorun başka (PC kapalı / firewall): dokunma
+            let Some(b) = discover::pick(&found, c.port, &c.name).filter(|b| b.host != c.host) else { return };
+            ui.set_status(format!("PC moved: {} → {}", c.host, b.host).into());
+            c.host = b.host.clone();
+            c.name = b.name.clone();
+            config::save(path.as_deref(), &c);
+            ui.set_cfg_host(c.host.as_str().into());
+            connect(&c);
+            *current.borrow_mut() = c;
+        })));
+    }
+
     // --- Ayarlar ---
     {
         let weak = ui.as_weak();
@@ -474,8 +571,12 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                 return false;
             };
             match config::parse(&ui.get_cfg_host(), &ui.get_cfg_port(), &ui.get_cfg_token()) {
-                Ok(c) => {
+                Ok(mut c) => {
                     ui.set_cfg_error("".into());
+                    // Aynı PC'de kaldıysa adı koru (otomatik yeniden bağlanma); başka PC'ye geçtiyse bağlanınca öğrenilir
+                    if c.host == current.borrow().host {
+                        c.name = current.borrow().name.clone();
+                    }
                     config::save(cfg_path.as_deref(), &c);
                     connect(&c);
                     *current.borrow_mut() = c;
@@ -536,6 +637,9 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
     ON_ACTIVE.with(|h| h.borrow_mut().take());
     QUERY_EVENTS.with(|h| h.borrow_mut().take());
     SEND.with(|h| h.borrow_mut().take());
+    WAKE.with(|h| h.borrow_mut().take());
+    REMEMBER.with(|h| h.borrow_mut().take());
+    REHOME.with(|h| h.borrow_mut().take());
     r
 }
 
@@ -564,6 +668,8 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
         }
         Event::Connected { server } => {
             ui.set_connected(true);
+            FAILS.set(0);
+            REMEMBER.with_borrow(|f| f.as_ref().map(|f| f(&server)));
             ui.set_status(format!("Connected: {server}").into());
             QUERY_EVENTS.with(|q| q.borrow().as_ref().map(|f| f()));
             if ui.get_tab() == 4 {
@@ -576,6 +682,12 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
         Event::Disconnected { reason } => {
             ui.set_connected(false);
             ui.set_status(format!("Disconnected: {reason}").into());
+            // PC IP'si değişmiş olabilir (DHCP): birkaç denemeden sonra keşif, sonra seyrek
+            let n = FAILS.get() + 1;
+            FAILS.set(n);
+            if n >= REDISCOVER_AFTER && (n - REDISCOVER_AFTER).is_multiple_of(5) {
+                rediscover();
+            }
             ui.set_lm_state(0);
             ui.set_ai_state(0);
             ui.set_alarms("".into());
@@ -607,7 +719,12 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
                 _ => {}
             }
             ui.set_alarms(a.join(", ").into());
+            // Alarm kalktı (kullanım kuralı ya da PC sıcaklık eşiği): perde iniksa ekranı aç
+            let wake = e.kind == 0 && ui.get_blackout();
             prepend(ui, &[e]);
+            if wake {
+                WAKE.with_borrow(|f| f.as_ref().map(|f| f()));
+            }
         }
         // Parçalar eskiden yeniye gelir; her biri başa eklenince liste yeniden eskiye sıralı kalır.
         Event::Msg(S2C::Events(v)) => prepend(ui, &v),
@@ -1168,6 +1285,16 @@ fn set_vec<T: Clone + 'static>(cur: ModelRc<T>, v: Vec<T>, set: impl FnOnce(Mode
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ai_busy_rules() {
+        let w = |pct, level| Some(AiWindow { pct, resets_at: 0, level });
+        let a = |session, week| AiUsage { session, week, ..AiUsage::default() };
+        assert!(!ai_busy(&a(None, None)));
+        assert!(!ai_busy(&a(w(799, 0), w(100, 0))));
+        assert!(ai_busy(&a(w(800, 0), None)));
+        assert!(ai_busy(&a(w(100, 0), w(300, 1)))); // PC uyarı seviyesi (tempo)
+    }
 
     #[test]
     fn ai_text() {

@@ -8,11 +8,13 @@ pub struct AppConfig {
     pub host: String,
     pub port: u16,
     pub token: String,
+    /// Keşifte / bağlanınca görülen PC adı; otomatik yeniden bağlanmada aynı PC'yi seçmek için. Boş = bilinmiyor.
+    pub name: String,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
-        Self { host: String::new(), port: DEFAULT_PORT, token: "dev".into() }
+        Self { host: String::new(), port: DEFAULT_PORT, token: "dev".into(), name: String::new() }
     }
 }
 
@@ -28,6 +30,7 @@ pub fn load(path: Option<&Path>) -> AppConfig {
             "host" => c.host = v.to_string(),
             "port" => c.port = v.parse().unwrap_or(DEFAULT_PORT),
             "token" => c.token = v.to_string(),
+            "name" => c.name = v.to_string(),
             _ => {}
         }
     }
@@ -51,7 +54,7 @@ pub fn parse(host: &str, port: &str, token: &str) -> Result<AppConfig, &'static 
     if token.is_empty() || token.contains(['\n', '\r']) {
         return Err("Token is empty or contains a line break");
     }
-    Ok(AppConfig { host: host.to_string(), port, token: token.to_string() })
+    Ok(AppConfig { host: host.to_string(), port, token: token.to_string(), name: String::new() })
 }
 
 pub fn save(path: Option<&Path>, c: &AppConfig) {
@@ -59,7 +62,9 @@ pub fn save(path: Option<&Path>, c: &AppConfig) {
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let _ = std::fs::write(p, format!("host={}\nport={}\ntoken={}\n", c.host, c.port, c.token));
+        // Ad sunucudan gelir (≤ 63 karakter); satır sonu dosyayı bozmasın
+        let name = c.name.replace(['\n', '\r'], " ");
+        let _ = std::fs::write(p, format!("host={}\nport={}\ntoken={}\nname={name}\n", c.host, c.port, c.token));
     }
 }
 
