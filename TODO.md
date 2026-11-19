@@ -2,7 +2,9 @@
 ## Şimdi
 - [ ] docs/gereksinimler.md doldur
 - [x] Faz 0: GitHub repo + ilk CI koşusu
-- [ ] Faz 0: keystore + `ANDROID_KEYSTORE_*` secret'ları (kullanıcı)
+- [x] Faz 0: keystore + `ANDROID_KEYSTORE_*` secret'ları (2026-11-15; CI de aynı keystore ile imzalar)
+- [x] v1.0.0 (2026-11-19): sürüm, CHANGELOG, README EN + TR, HANDOFF; tag kullanıcıda
+- [ ] v1 sonrası cihazda: perdenin alarmla / arada açılması, PC IP'si değişince otomatik yeniden bağlanma (#40)
 
 ## ADR-0031 taşınma (PC tarafı → LowMonitor)
 - [x] LM Faz 1: `lowmon-deck` crate (agent kodu) — LM reposu

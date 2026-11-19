@@ -2,7 +2,13 @@
 Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve commit).
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-11-19
+İlk sürüm: telefon uygulaması (Control, Live, Events, History, Processes, AI, Settings), protokol sürüm 4. PC tarafı LowMonitor v1.0.0.
 ### Eklendi
+- Telefon: perde inikken yalnız alarm + AI push'ları; alarm kalkınca ekran açılır (kullanım kuralları ve LM tray sıcaklık eşikleri), PC meşgulken (aktif alarm ya da Claude limiti ≥ %80) 10 dk'da bir 15 s açılır (#40)
+- Telefon: otomatik yeniden bağlanma: bağlanınca PC adı kaydedilir; üst üste kopuşta keşif yapılır, aynı PC'nin yeni IP'si bulunursa kaydedilip bağlanılır (#40)
+- README İngilizce + `README.tr.md`; `HANDOFF.md`, `AGENTS.md`, `GEMINI.md`
 - Telefon: grafiğe dokunup parmağı kaydırınca dikey çizgi + zaman ve değer etiketi (LowMonitor'daki hover gibi): Canlı (saat, CPU/GPU %·°C, RAM, disk, ağ) ve History (kova aralığı, avg/max, °C). Parmak kalkınca kaybolur
 - Telefon: sol şerit **çark** oldu (aktif sekme ortada, komşular küçülüp söner, uçta ▲▼); sekme değişimi dikey kaydırmayla — şeritte her zaman, içerikte yalnız Control/Live/History/Settings'te (listeler normal kayar). Yatay kaydırma kalktı
 - Telefon: içerikte yatay kaydırma ile sekme değiştirme (sola → sonraki, sağa → önceki); şerit düğmeleriyle aynı abonelik/sorgu yolu. Şerit daraldı (104 → 76 px); ⚙ paneli yerine **Settings** sekmesi

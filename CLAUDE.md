@@ -100,7 +100,7 @@ adb install -r lowdeck-*.apk        # telefona kur (USB hata ayıklama açıksa)
 - Oturum sonunda `docs/devlog/YYYY-MM.md`'ye ekle: tarih, ne yapıldı, ölçümler (APK boyutu, RSS, CPU), açık sorular, sıradaki adım.
 
 ### Doküman / dosya
-- Doküman Türkçe; kodda İngilizce tanımlayıcı, Türkçe yorum serbest.
+- Doküman Türkçe; kodda İngilizce tanımlayıcı, Türkçe yorum serbest. README İngilizce (`README.md`) + Türkçe (`README.tr.md`); biri değişince diğeri de güncellenir.
 - Birimler SI; tarih ISO (YYYY-MM-DD). Yeni dosya adları küçük harf, kebab-case, Türkçe karakter/boşluk yok.
 - Mimari/protokol/bağımlılık gibi geri dönüşü pahalı kararlar → `docs/kararlar/ADR-XXXX-*.md`.
 - Kullanıcıya görünen değişiklik ya da sürüm → `CHANGELOG.md` (Keep a Changelog).
@@ -108,6 +108,10 @@ adb install -r lowdeck-*.apk        # telefona kur (USB hata ayıklama açıksa)
 ### Sürümleme ve commit
 - SemVer, tek kaynak `Cargo.toml` `[workspace.package] version`; tag `vX.Y.Z` (bkz. Faz 0).
 - Conventional Commits, kapsam = crate/alan: `feat(proto)`, `feat(client)`, `feat(phone)`, `fix(mock)`, `ci:`, `docs:`, `chore:`.
+
+### Handoff
+- Oturum sonunda veya "token azalıyor" denince `HANDOFF.md`'yi güncelle (durum, açık sorun, sıradaki 3 adım, dokunma listesi).
+- Başka bir araçtan (Gemini/OpenCode) gelen çıktıyı uygulamadan önce mevcut kodla ve `docs/PROTOCOL.md` ile çelişkileri kontrol et.
 
 ## 6. Yol haritası
 
