@@ -1,38 +1,61 @@
 # LowDeck
-Eski Xiaomi Mi Note 10 Lite'ı aynı LAN'daki Windows PC için minimum tüketimli kontrol paneline (ses, medya) çeviren Rust + Slint uygulaması.
+Rust + Slint app that turns an old Xiaomi Mi Note 10 Lite into a minimum-power control panel and monitor for a Windows PC on the same LAN. The PC side lives in [LowMonitor](https://github.com/kalkanozgur/lowmonitor).
 
-| Alan | Değer |
+Türkçe: [README.tr.md](README.tr.md)
+
+| Field | Value |
 |---|---|
-| Durum | Prototip (Faz 1 — masaüstünde telefon UI'ı) |
-| Modüller | yazılım (Rust workspace: proto, client, phone, mock-server) |
-| Başlangıç | 2026-11-14 |
+| Status | v1.0.0 — tested on a Mi Note 10 Lite (Android 12) and a Samsung M21 |
+| Modules | software (Rust workspace: proto, client, phone, mock-server) |
+| Started | 2026-11-14 |
 
-## Klasör yapısı
+## Features (phone)
+| Tab | Content |
+|---|---|
+| Control | PC volume / mute, media (play/pause, prev/next, now playing), lock PC keyboard |
+| Live | Claude usage band, CPU / GPU / RAM / disk / network cards with 5 min graphs, °C, cores, top-5 |
+| Events | Last 24 h of LowMonitor alarms and system events; alarm band on every tab |
+| History | 1 h / 6 h / 24 h / 7 d: CPU, RAM, disk, network, GPU, temperatures |
+| Processes | Sort by CPU / RAM, search, two-step kill (protected processes excluded) |
+| AI | Claude limit lines, token breakdown, sessions |
+| Settings | PC address, port, token, "Find PC"; PC AI settings (`ai.toml`) |
+
+- Landscape full screen, vertical tab wheel; touch a graph for time + value.
+- Black blackout after 120 s idle; only alarm / AI pushes while dark. The screen wakes on an alarm (usage rules or PC temperature thresholds) and, when the PC is busy (active alarm or Claude limit ≥ 80 %), for 15 s every 10 min.
+- Finds the PC by UDP discovery; when the PC's IP changes (DHCP) it rediscovers the same PC by name and reconnects.
+- No network traffic in the background (app paused = socket closed).
+
+## Folder structure
 ```
-crates/lowdeck-proto     protokol tipleri + çerçeveleme
-crates/lowdeck-client    UI'dan bağımsız istemci
-apps/lowdeck-phone       Slint uygulaması (Android + masaüstü)
-tools/mock-server        sahte PC sunucusu
-docs/                    PROTOCOL, gereksinimler, devlog, kararlar
-.github/                 CI (APK artifact) + release
+crates/lowdeck-proto     protocol types + framing (single source of truth; LowMonitor uses it by git rev)
+crates/lowdeck-client    UI-independent client (+ examples/cli.rs)
+apps/lowdeck-phone       Slint app (Android + desktop dev build)
+tools/mock-server        fake PC server
+docs/                    PROTOCOL, requirements, devlog, decisions (kararlar)
+.github/                 CI (test + APK artifact) and tag-triggered release
 ```
 
-## Hızlı başlangıç
+## Quick start
+Install on the phone: download `lowdeck-vX.Y.Z.apk` from [Releases](https://github.com/kalkanozgur/lowdeck/releases) or `adb install -r lowdeck-*.apk`.
+
+PC side: install LowMonitor (`scripts\install.ps1`); the phone server runs inside `lowmon-tray`.
+- Phone settings (host · port · token): LowMonitor tray → **Phone ▸** first line; config `%APPDATA%\LowMonitor\deck.toml`.
+- Phone: Settings → **Find PC** (same Wi-Fi) → pick it, enter the token. Not found: tray → Phone ▸ **Add firewall rule** (TCP port + UDP 47811 discovery).
+
+Development (desktop):
 ```powershell
 cargo run -p mock-server -- 47810 dev
-cargo run -p lowdeck-phone --bin lowdeck-phone-dev   # ⚙ → 127.0.0.1 / 47810 / dev
-cargo run -p lowdeck-client --example cli -- 127.0.0.1 47810 dev   # UI'sız istemci
+cargo run -p lowdeck-phone --bin lowdeck-phone-dev   # Settings → 127.0.0.1 / 47810 / dev
+cargo run -p lowdeck-client --example cli -- 127.0.0.1 47810 dev   # headless client
 ```
-APK GitHub Actions'ta derlenir (bkz. `CLAUDE.md` Faz 0).
+The APK is built on GitHub Actions only (no local Android toolchain); see `CLAUDE.md` Phase 0.
 
-## PC tarafı (LowMonitor)
-Gerçek PC sunucusu ve PC arayüzü LowMonitor reposunda (LM ADR-0031): sunucu `lowmon-tray` içinde (`lowmon-deck`), arayüz `lowmon-ui`. Kurulum LowMonitor `scripts\install.ps1`.
-- Telefon ayarı (host · port · token): LowMonitor tray → **Telefon ▸** ilk satır; ayar `%APPDATA%\LowMonitor\deck.toml` (eski `agent.cfg`'den taşınır, telefon ayarı değişmez).
-- Telefon: ⚙ → **PC'yi bul** (aynı Wi-Fi) → listeden seç. Bulamıyorsa: tray → Telefon ▸ **Firewall kuralı ekle** (TCP port + UDP 47811 keşif).
+## AI agent handoff
+See `HANDOFF.md` for current state and next steps. Rules live in `CLAUDE.md`.
 
-## Lisans
-MIT ya da Apache-2.0, seçim sizin ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).
+## License
+MIT or Apache-2.0, at your option ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).
 
-Arayüz [Slint](https://slint.dev) ile yapıldı ([Royalty-free 2.0](https://github.com/slint-ui/slint/blob/master/LICENSES/LicenseRef-Slint-Royalty-free-2.0.md) lisansı; atıf şartı):
+The UI is built with [Slint](https://slint.dev) ([Royalty-free 2.0](https://github.com/slint-ui/slint/blob/master/LICENSES/LicenseRef-Slint-Royalty-free-2.0.md) license; attribution required):
 
 <a href="https://slint.dev"><img alt="Made with Slint" src="https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-light.svg" height="60"></a>
