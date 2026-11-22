@@ -18,13 +18,16 @@ VER=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version *= *"\(.*\)"/\1/p' Cargo.
 IFS=. read -r MA MI PA <<<"${VER%%[-+]*}"
 CODE=$(( 1<<24 | MA<<16 | MI<<8 | PA ))
 
-cargo ndk -t arm64-v8a build -p lowdeck-phone --release --lib
+# --platform 29 = minSdk (cargo-apk ile aynı API seviyesi). ANDROID_JAR: Slint'in build.rs'i
+# kendi Java yardımcısını derlerken kullanır; yoksa cargo-ndk'nın ANDROID_PLATFORM'uyla jar arar.
+export ANDROID_JAR="$ANDROID_HOME/platforms/android-34/android.jar"
+cargo ndk -t arm64-v8a --platform 29 build -p lowdeck-phone --release --lib
 
 rm -rf "$WORK"; mkdir -p "$STAGE/lib/arm64-v8a" "$(dirname "$OUT")"
 cp target/aarch64-linux-android/release/liblowdeck_phone.so "$STAGE/lib/arm64-v8a/"
 
 "$BT/aapt2" link -o "$WORK/base.apk" \
-  -I "$ANDROID_HOME/platforms/android-34/android.jar" \
+  -I "$ANDROID_JAR" \
   --manifest apps/lowdeck-phone/android/AndroidManifest.xml \
   --version-code "$CODE" --version-name "$VER"
 
