@@ -48,7 +48,7 @@ cargo run -p mock-server -- 47810 dev
 cargo run -p lowdeck-phone --bin lowdeck-phone-dev   # Settings → 127.0.0.1 / 47810 / dev
 cargo run -p lowdeck-client --example cli -- 127.0.0.1 47810 dev   # headless client
 ```
-The APK is built on GitHub Actions only (no local Android toolchain); see `CLAUDE.md` Phase 0.
+The APK is built on GitHub Actions only (no local Android toolchain) by `scripts/build-apk.sh`: `cargo ndk` → `aapt2 link` (manifest: `apps/lowdeck-phone/android/AndroidManifest.xml`) → `zipalign` → `apksigner`. See `CLAUDE.md` Phase 0.
 
 ## AI agent handoff
 See `HANDOFF.md` for current state and next steps. Rules live in `CLAUDE.md`.
