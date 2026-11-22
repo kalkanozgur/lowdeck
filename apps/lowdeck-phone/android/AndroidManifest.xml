@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- cargo-apk'ın ürettiği manifestin birebir karşılığı. versionCode/versionName
-     scripts/build-apk.sh tarafından Cargo.toml sürümünden verilir (aapt2 --version-*). -->
+     scripts/build-apk.sh tarafından Cargo.toml sürümünden verilir (aapt2 version-code/version-name bayrakları). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.kalkan.lowdeck">
 
