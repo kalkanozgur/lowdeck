@@ -1,24 +1,25 @@
 # HANDOFF — LowDeck
-**Güncelleme:** 2026-11-19 · **Güncelleyen:** Claude Code · **Kaynak durumu:** v1.0.0 (main)
+**Güncelleme:** 2026-11-22 · **Güncelleyen:** Claude Code · **Kaynak durumu:** v1.1.0 (sürüm PR'ı; tag kullanıcıda)
 
 ## Durum
-v1.0.0: telefon uygulaması (7 sekme) + `lowdeck-proto` (sürüm 4) + `lowdeck-client` + `mock-server`. PC sunucusu LowMonitor tray'de (`lowmon-deck`, LM v1.0.0). Mi Note 10 Lite'ta #40 CI APK'sı (içerik = main `4c6d9f1`) kurulu (2026-11-19 15:44), PC'ye otomatik keşifle bağlandı.
+v1.1.0: telefon uygulaması (7 sekme) + arka plan bildirimi (ADR-0011) + `lowdeck-proto` (sürüm 4) + `lowdeck-client` + `mock-server`. PC sunucusu LowMonitor tray'de (`lowmon-deck`, LM v1.1.0). APK `scripts/build-apk.sh` ile (cargo-ndk + aapt2 + d8). Samsung M21'de #44 CI APK'sı kurulu, UAC/Claude bildirimi doğrulandı (2026-11-22).
 
-## Son yapılanlar (2026-11-19)
-- Perde inikken `TOPIC_EVENTS | TOPIC_AI`; alarmda ekran açılır; PC meşgulken 10 dk'da bir 15 s (#40)
-- Otomatik yeniden bağlanma: sunucu adı `lowdeck.cfg` `name=`'e; kopunca keşif + aynı PC'nin yeni IP'si (#40)
-- README EN + TR, HANDOFF / GEMINI / AGENTS, CLAUDE.md Handoff bölümü, sürüm 1.0.0
+## Son yapılanlar (2026-11-22)
+- LM v1.1.0 olay metinleri, kısa alarm adı, cihaz adı `ro.product.model` (#43)
+- cargo-apk → aapt2/d8 betiği (#42)
+- Foreground service `DeckService.java`, arka planda yalnız olay aboneliği, UAC/firewall/Claude.Input bildirimi (#44, ADR-0011)
 
 ## Açık sorun / blokaj
-- Cihazda gözlenmedi: perdenin alarmla / arada açılması, PC IP'si çalışırken değişince yeniden bağlanma
-- "Claude çalışıyor" bilgisi protokolde yok → meşgul koşulunda değil
-- Telefon adı Android'de sabit `"toco"`; Settings sütunları kayıyor (TODO.md)
+- Ölçülmedi: arka plan pil tüketimi (FGS + 25 s ping), şarjsız Doze'da bağlantı
+- Cihazda gözlenmedi: `firewall` bildirimi, Mi Note 10 Lite'ta v1.1.0, perdenin arada açılması, DHCP ile yeniden bağlanma
+- Görev kaydırılıp kapatılınca servis durur → bildirim gelmez (tasarım, ADR-0011)
+- Settings sütunları kayıyor (TODO.md)
 - `cargo fmt` repoyla uyumsuz (ilgisiz dosyaları biçimliyor) → çalıştırılmıyor; ayrı bir biçimleme PR'ı kararı gerekir
 
 ## Sıradaki adımlar (sırayla)
-1. Cihazda doğrulama: perde + alarm (LM'de eşiği geçici düşürerek), DHCP yenileme ile yeniden bağlanma
-2. Faz 3 tüketim ölçümü (`adb shell top`, `dumpsys meminfo`, `batterystats`) → devlog
-3. Telefon adını cihazdan al (`Build.MODEL`) + Settings sütunlarını sabitle
+1. Kullanıcı `v1.1.0` tag'ini atar → release APK'yı iki telefona kur
+2. Faz 3 tüketim ölçümü, arka plan dahil (`adb shell top`, `dumpsys meminfo`, `batterystats`) → devlog
+3. Settings sütunlarını sabitle; telefonda parmak izi / PIN ile PC kilidi açma (Faz 5)
 
 ## Dokunma
 - `docs/PROTOCOL.md` / `lowdeck-proto`: varyant yalnız sona eklenir; değişiklikten sonra LM `lowdeck-proto` rev'i güncellenir
@@ -28,8 +29,8 @@ v1.0.0: telefon uygulaması (7 sekme) + `lowdeck-proto` (sürüm 4) + `lowdeck-c
 
 ## Kritik dosyalar
 - `CLAUDE.md` — kurallar ve yol haritası · `TODO.md` · `CHANGELOG.md`
-- `docs/PROTOCOL.md` — protokol sözleşmesi · `docs/kararlar/ADR-*.md` (son: ADR-0010) · `docs/devlog/2026-11.md`
-- `apps/lowdeck-phone/src/lib.rs` (UI, perde, yeniden bağlanma), `discover.rs`, `config.rs`
+- `docs/PROTOCOL.md` — protokol sözleşmesi · `docs/kararlar/ADR-*.md` (son: ADR-0011) · `docs/devlog/2026-11.md`
+- `apps/lowdeck-phone/src/lib.rs` (UI, perde, yeniden bağlanma, arka plan), `notify.rs` + `android/java/…/DeckService.java` (bildirim), `android/AndroidManifest.xml`, `scripts/build-apk.sh`, `discover.rs`, `config.rs`
 
 ## Doğrulama
 - `cargo test --workspace` · `cargo clippy --workspace --all-targets -- -D warnings`

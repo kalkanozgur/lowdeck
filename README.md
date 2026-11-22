@@ -5,7 +5,7 @@ Türkçe: [README.tr.md](README.tr.md)
 
 | Field | Value |
 |---|---|
-| Status | v1.0.0 — tested on a Mi Note 10 Lite (Android 12) and a Samsung M21 |
+| Status | v1.1.0 — tested on a Mi Note 10 Lite (Android 12) and a Samsung M21 |
 | Modules | software (Rust workspace: proto, client, phone, mock-server) |
 | Started | 2026-11-14 |
 
@@ -23,7 +23,8 @@ Türkçe: [README.tr.md](README.tr.md)
 - Landscape full screen, vertical tab wheel; touch a graph for time + value.
 - Black blackout after 120 s idle; only alarm / AI pushes while dark. The screen wakes on an alarm (usage rules or PC temperature thresholds) and, when the PC is busy (active alarm or Claude limit ≥ 80 %), for 15 s every 10 min.
 - Finds the PC by UDP discovery; when the PC's IP changes (DHCP) it rediscovers the same PC by name and reconnects.
-- No network traffic in the background (app paused = socket closed).
+- In the background (other app / screen off) it stays connected via a foreground service and subscribes to events only (no metric stream). A UAC or firewall prompt on the PC, or Claude waiting for input, raises a vibrating Android notification that clears when the prompt closes; temperature / usage alarms do not notify.
+- Shows LowMonitor v1.1.0 events by name (UAC, Firewall, Claude waiting, CPU/GPU/Disk temp). The phone reports its model name, so several phones are told apart in the LowMonitor tray.
 
 ## Folder structure
 ```

@@ -2,11 +2,15 @@
 Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve commit).
 
 ## [Unreleased]
+
+## [1.1.0] - 2026-11-22
+LowMonitor v1.1.0 ile uyum + arka plan bildirimi. Protokol değişmedi (sürüm 4).
 ### Eklendi
 - Telefon: LowMonitor v1.1.0 olayları okunur: UAC / güvenlik duvarı istemi (`uac`, `firewall`), Claude girdi bekliyor (`Claude.Input`), PC sıcaklık eşiği (`Temp.CPU/GPU/Disk`, değer °C), `uac_unavailable`. Alarm bandında kısa ad (ör. "UAC, CPU temp")
 - Telefon (ADR-0011): uygulama arka plandayken / ekran kapalıyken de PC'ye bağlı kalır (foreground service, kalıcı "Listening for PC alerts" bildirimi); PC'de UAC ya da güvenlik duvarı istemi açılınca veya Claude girdi isteyince titreşimli Android bildirimi, istem kapanınca bildirim kalkar. Sıcaklık/kullanım alarmları bildirim üretmez. Arka planda yalnız olay aboneliği (metrik akışı yok)
 ### Değişti
 - Telefon: Hello'daki cihaz adı sabit "toco" yerine Android model adı (`ro.product.model`); LM'de çoklu telefon (LM ADR-0036) tray'de ayırt edilir
+- Build: APK cargo-apk yerine `scripts/build-apk.sh` (cargo-ndk + aapt2 + d8 + apksigner) ile; manifest `apps/lowdeck-phone/android/AndroidManifest.xml`. Aynı paket adı ve imza, `adb install -r` ile üstüne kurulur (#42)
 
 ## [1.0.0] - 2026-11-19
 İlk sürüm: telefon uygulaması (Control, Live, Events, History, Processes, AI, Settings), protokol sürüm 4. PC tarafı LowMonitor v1.0.0.
