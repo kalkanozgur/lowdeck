@@ -105,6 +105,17 @@ thread_local! {
     static REHOME: RefCell<Option<FoundHook>> = const { RefCell::new(None) };
     /// Son bağlantıdan beri üst üste kopuş.
     static FAILS: Cell<u32> = const { Cell::new(0) };
+    /// Aktif alarmların ham adları (bant `events::short` ile gösterir); asıl liste sunucuda.
+    static ALARMS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// `ALARMS`'ı değiştirir ve bandı kısa adlarla yeniler.
+fn set_alarms(ui: &MainWindow, f: impl FnOnce(&mut Vec<String>)) {
+    let text = ALARMS.with_borrow_mut(|a| {
+        f(a);
+        a.iter().map(|n| events::short(n)).collect::<Vec<_>>().join(", ")
+    });
+    ui.set_alarms(text.into());
 }
 
 /// AI penceresi PC'de uyarı seviyesinde ya da ≥ %80.
@@ -168,7 +179,19 @@ fn android_main(app: slint::android::AndroidApp) {
         });
     })
     .expect("slint android init");
-    run(data_dir, "toco").expect("run");
+    run(data_dir, &device_name()).expect("run");
+}
+
+/// Hello'daki cihaz adı (LM tray'de çoklu telefon ayrımı, LM ADR-0036): Android `Build.MODEL` (= `ro.product.model`).
+#[cfg(target_os = "android")]
+fn device_name() -> String {
+    let mut buf = [0u8; 92]; // PROP_VALUE_MAX
+    // SAFETY: bionic `__system_property_get` en çok PROP_VALUE_MAX (92) bayt + NUL yazar; ad NUL sonlu literal.
+    let n = unsafe { libc::__system_property_get(c"ro.product.model".as_ptr(), buf.as_mut_ptr().cast()) };
+    match std::str::from_utf8(&buf[..n.clamp(0, 91) as usize]) {
+        Ok(s) if !s.trim().is_empty() => s.trim().into(),
+        _ => "android".into(),
+    }
 }
 
 pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::PlatformError> {
@@ -690,7 +713,7 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
             }
             ui.set_lm_state(0);
             ui.set_ai_state(0);
-            ui.set_alarms("".into());
+            set_alarms(ui, Vec::clear);
             LAST_SENS.set(None);
             show_sensors(ui, None);
             clear_graphs(ui);
@@ -700,25 +723,17 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
             ui.set_aicfg_loaded(false); // eski değerle yazma olmasın; sekmeye dönünce yeniden sorgu
             AICFG_SAVING.set(false);
         }
-        Event::Msg(S2C::Alarms(a)) => ui.set_alarms(a.join(", ").into()),
+        Event::Msg(S2C::Alarms(a)) => set_alarms(ui, |x| *x = a),
         Event::Msg(S2C::Sensors(s)) => {
             LAST_SENS.set(Some(s));
             show_sensors(ui, Some(&s));
         }
         Event::Msg(S2C::Event(e)) => {
-            // Aktif alarm listesi yalnız gösterim için güncellenir (asıl liste sunucuda).
-            let mut a: Vec<String> = ui
-                .get_alarms()
-                .split(", ")
-                .filter(|s| !s.is_empty())
-                .map(String::from)
-                .collect();
-            match e.kind {
+            set_alarms(ui, |a| match e.kind {
                 0 if !a.contains(&e.name) => a.push(e.name.clone()),
                 1 => a.retain(|x| *x != e.name),
                 _ => {}
-            }
-            ui.set_alarms(a.join(", ").into());
+            });
             // Alarm kalktı (kullanım kuralı ya da PC sıcaklık eşiği): perde iniksa ekranı aç
             let wake = e.kind == 0 && ui.get_blackout();
             prepend(ui, &[e]);

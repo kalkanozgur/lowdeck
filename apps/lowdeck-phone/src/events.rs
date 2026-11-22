@@ -16,7 +16,19 @@ pub fn desc(e: &EventItem) -> String {
         (2, "control_reload") if e.value != 0 => "Settings reloaded",
         (2, "control_reload") => "Settings reload failed (config.toml invalid)",
         (2, "write_error") => "Log write failed",
+        (2, "uac_unavailable") => return format!("UAC notifications unavailable (code {})", e.value),
         (2, _) => "",
+        // LM ADR-0037 (servis) ve tray (#69 sıcaklık, #79 Claude); kind 0 = açıldı, 1 = kapandı
+        (0, "uac") => "UAC prompt open",
+        (1, "uac") => "UAC prompt closed",
+        (0, "firewall") => "Firewall permission prompt open",
+        (1, "firewall") => "Firewall permission prompt closed",
+        (0, "Claude.Input") => "Claude is waiting for input",
+        (1, "Claude.Input") => "Claude input answered",
+        (k, name) if name.starts_with("Temp.") => {
+            let state = if k == 0 { "crossed threshold" } else { "back to normal" };
+            return format!("{} temperature {state}", &name[5..]);
+        }
         (k, name) => {
             // shortcut: metrik kural adından tahmin (LM ile aynı); alarm tanımı proto'ya gelirse oradan
             let what = match name.split(['_', '.']).next().unwrap_or("") {
@@ -38,8 +50,23 @@ pub fn value(e: &EventItem) -> String {
     if e.kind == 2 {
         return String::new();
     }
-    let unit = if e.name.starts_with("cpu") || e.name.starts_with("ram") { "%" } else { "" };
+    let unit = match e.name.as_str() {
+        "uac" | "firewall" | "Claude.Input" => return String::new(),
+        n if n.starts_with("Temp.") => " °C",
+        n if n.starts_with("cpu") || n.starts_with("ram") => "%",
+        _ => "",
+    };
     format!("{:.1}{unit}", e.value as f64 / 100.0)
+}
+
+/// Alarm bandı için kısa ad; bilinmeyen ad olduğu gibi.
+pub fn short(name: &str) -> String {
+    match name {
+        "uac" => "UAC".into(),
+        "firewall" => "Firewall".into(),
+        "Claude.Input" => "Claude waiting".into(),
+        n => n.strip_prefix("Temp.").map_or_else(|| n.into(), |x| format!("{x} temp")),
+    }
 }
 
 /// `MM-DD HH:MM:SS` (yerel). Gün → takvim: H. Hinnant `civil_from_days`.
@@ -87,5 +114,15 @@ mod tests {
         assert_eq!(desc(&e(0, "cpu_high", 0)), "CPU usage crossed threshold");
         assert_eq!(desc(&e(1, "ram_high", 0)), "Memory usage back to normal");
         assert_eq!(desc(&e(2, "service_start", 0)), "Service started");
+        assert_eq!(desc(&e(2, "uac_unavailable", 5)), "UAC notifications unavailable (code 5)");
+        assert_eq!(desc(&e(0, "uac", 0)), "UAC prompt open");
+        assert_eq!(desc(&e(1, "firewall", 0)), "Firewall permission prompt closed");
+        assert_eq!(desc(&e(0, "Claude.Input", 0)), "Claude is waiting for input");
+        assert_eq!(desc(&e(0, "Temp.GPU", 0)), "GPU temperature crossed threshold");
+        assert_eq!(value(&e(0, "Temp.CPU", 8500)), "85.0 °C");
+        assert_eq!(value(&e(0, "uac", 0)), "");
+        assert_eq!(short("Temp.Disk"), "Disk temp");
+        assert_eq!(short("Claude.Input"), "Claude waiting");
+        assert_eq!(short("cpu_high"), "cpu_high");
     }
 }

@@ -2,6 +2,10 @@
 Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve commit).
 
 ## [Unreleased]
+### Eklendi
+- Telefon: LowMonitor v1.1.0 olayları okunur: UAC / güvenlik duvarı istemi (`uac`, `firewall`), Claude girdi bekliyor (`Claude.Input`), PC sıcaklık eşiği (`Temp.CPU/GPU/Disk`, değer °C), `uac_unavailable`. Alarm bandında kısa ad (ör. "UAC, CPU temp")
+### Değişti
+- Telefon: Hello'daki cihaz adı sabit "toco" yerine Android model adı (`ro.product.model`); LM'de çoklu telefon (LM ADR-0036) tray'de ayırt edilir
 
 ## [1.0.0] - 2026-11-19
 İlk sürüm: telefon uygulaması (Control, Live, Events, History, Processes, AI, Settings), protokol sürüm 4. PC tarafı LowMonitor v1.0.0.
