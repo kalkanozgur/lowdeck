@@ -5,7 +5,7 @@ English: [README.md](README.md)
 
 | Alan | Değer |
 |---|---|
-| Durum | v1.0.0 — Mi Note 10 Lite (Android 12) ve Samsung M21'de denendi |
+| Durum | v1.1.0 — Mi Note 10 Lite (Android 12) ve Samsung M21'de denendi |
 | Modüller | yazılım (Rust workspace: proto, client, phone, mock-server) |
 | Başlangıç | 2026-11-14 |
 
@@ -23,7 +23,8 @@ English: [README.md](README.md)
 - Yatay tam ekran, dikey sekme çarkı; grafiğe dokununca zaman + değer.
 - 120 s dokunulmazsa siyah perde; perde inikken yalnız alarm / AI push'ları gelir. Alarmda (kullanım kuralları ya da PC sıcaklık eşikleri) ekran açılır; PC meşgulken (aktif alarm ya da Claude limiti ≥ %80) 10 dk'da bir 15 s açılır.
 - PC'yi UDP keşifle bulur; PC'nin IP'si değişince (DHCP) aynı PC'yi adıyla yeniden bulup bağlanır.
-- Arka planda ağ trafiği yok (uygulama duraklayınca soket kapanır).
+- Arka planda (başka uygulama / ekran kapalı) foreground service ile bağlı kalır, yalnız olaylara abone olur (metrik akışı yok). PC'de UAC ya da güvenlik duvarı istemi açılınca veya Claude girdi isteyince titreşimli Android bildirimi gelir, istem kapanınca kalkar; sıcaklık / kullanım alarmları bildirim üretmez.
+- LowMonitor v1.1.0 olaylarını adıyla gösterir (UAC, Firewall, Claude waiting, CPU/GPU/Disk temp). Telefon model adını bildirir; LowMonitor tray'de birden çok telefon ayırt edilir.
 
 ## Klasör yapısı
 ```

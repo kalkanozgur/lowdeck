@@ -4,6 +4,8 @@
 - [x] Faz 0: GitHub repo + ilk CI koşusu
 - [x] Faz 0: keystore + `ANDROID_KEYSTORE_*` secret'ları (2026-11-15; CI de aynı keystore ile imzalar)
 - [x] v1.0.0 (2026-11-19): sürüm, CHANGELOG, README EN + TR, HANDOFF; tag kullanıcıda
+- [x] v1.1.0 (2026-11-22): LM v1.1.0 olay metinleri, cihaz adı, aapt2 build, arka plan bildirimi (ADR-0011); tag kullanıcıda
+- [ ] Faz 3: arka plan tüketimi (FGS + 25 s ping) ölç: `batterystats`, `top`; şarjsız Doze davranışı
 - [ ] v1 sonrası cihazda: perdenin alarmla / arada açılması, PC IP'si değişince otomatik yeniden bağlanma (#40)
 
 ## ADR-0031 taşınma (PC tarafı → LowMonitor)
