@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # lowdeck-phone release APK: cargo-ndk → aapt2 link → .so ekle → zipalign → apksigner.
 # Gerekli env: ANDROID_HOME, KS (keystore yolu), KS_PASS. İsteğe bağlı: BUILD_TOOLS (34.0.0), OUT.
-# Java eklenince: javac --release 8 + d8 --min-api 29 → $STAGE/classes.dex, aşağıdaki zip adımına eklenir.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,12 +25,18 @@ cargo ndk -t arm64-v8a --platform 29 build -p lowdeck-phone --release --lib
 rm -rf "$WORK"; mkdir -p "$STAGE/lib/arm64-v8a" "$(dirname "$OUT")"
 cp target/aarch64-linux-android/release/liblowdeck_phone.so "$STAGE/lib/arm64-v8a/"
 
+# Java (ADR-0011 DeckService): javac → d8 → classes.dex
+JAVA_SRC=apps/lowdeck-phone/android/java
+mkdir -p "$WORK/classes"
+javac --release 8 -classpath "$ANDROID_JAR" -d "$WORK/classes" $(find "$JAVA_SRC" -name '*.java')
+"$BT/d8" --release --min-api 29 --lib "$ANDROID_JAR" --output "$STAGE" $(find "$WORK/classes" -name '*.class')
+
 "$BT/aapt2" link -o "$WORK/base.apk" \
   -I "$ANDROID_JAR" \
   --manifest apps/lowdeck-phone/android/AndroidManifest.xml \
   --version-code "$CODE" --version-name "$VER"
 
-(cd "$STAGE" && zip -q -r ../base.apk lib)
+(cd "$STAGE" && zip -q -r ../base.apk lib classes.dex)
 "$BT/zipalign" -f -p 4 "$WORK/base.apk" "$WORK/aligned.apk"
 "$BT/apksigner" sign --ks "$KS" --ks-pass env:KS_PASS --ks-key-alias lowdeck \
   --out "$OUT" "$WORK/aligned.apk"
