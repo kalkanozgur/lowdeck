@@ -48,7 +48,7 @@ cargo run -p mock-server -- 47810 dev
 cargo run -p lowdeck-phone --bin lowdeck-phone-dev   # Settings → 127.0.0.1 / 47810 / dev
 cargo run -p lowdeck-client --example cli -- 127.0.0.1 47810 dev   # UI'sız istemci
 ```
-APK yalnız GitHub Actions'ta derlenir (lokalde Android araç zinciri yok); bkz. `CLAUDE.md` Faz 0.
+APK yalnız GitHub Actions'ta `scripts/build-apk.sh` ile derlenir (lokalde Android araç zinciri yok): `cargo ndk` → `aapt2 link` (manifest: `apps/lowdeck-phone/android/AndroidManifest.xml`) → `zipalign` → `apksigner`. Bkz. `CLAUDE.md` Faz 0.
 
 ## Yapay zeka ajanı devri
 Son durum ve sıradaki adımlar `HANDOFF.md`'de; kurallar `CLAUDE.md`'de.

@@ -122,7 +122,7 @@ APK'lar GitHub Actions'ta derlenir. Lokalde sadece Rust + masaüstü build gerek
 |---|---|---|
 | `.github/workflows/ci.yml` | PR, main push | test + clippy (Linux) → imzalı APK → **artifact** (14 gün) |
 | `.github/workflows/release.yml` | `v*` tag push | imzalı APK (onay = tag push; ortam onayı yok, bkz. not) → GitHub Release (+ sha256). PC exe'leri LowMonitor'da (LM ADR-0031) |
-| `.github/actions/build-apk` | ortak | JDK 17, Rust + `aarch64-linux-android`, SDK 34, NDK r27c, cargo-apk, imzalama |
+| `.github/actions/build-apk` | ortak | JDK 17, Rust + `aarch64-linux-android`, SDK 34 + build-tools 34.0.0, NDK r27c, cargo-ndk → `scripts/build-apk.sh` (aapt2 link + zipalign + apksigner; manifest `apps/lowdeck-phone/android/AndroidManifest.xml`) |
 
 Çalışma akışı:
 1. Claude değişikliği **ayrı bir branch'te** yapar, PR açar. `main`'e doğrudan push yasak.
@@ -140,7 +140,7 @@ Tek seferlik kurulum (kullanıcı yapar):
 - Not (2026-11-14): repo private + GitHub Free → branch koruması ve environment reviewer **kullanılamıyor** (API 403). PR akışı ve "main'e doğrudan push yok" kuralı disiplinle uygulanır; merge öncesi `check` + `apk` yeşil olmalı. Pro'ya geçilir ya da repo public olursa koruma + `environment: release` geri eklenir.
 - [ ] Keystore dosyası **asla** repoya girmez (`.gitignore`'da `*.keystore`).
 
-Workflow'lar ilk koşuda doğrulanacak; kırılırsa log okunup düzeltilir (ör. cargo-apk çıktı yolu, NDK sürümü). Slint'in güncel rehberi xbuild'i de gösteriyor; cargo-apk sorun çıkarırsa alternatif o.
+Build 2026-11-22'de cargo-apk'tan elle aapt2 betiğine geçti (Java sınıfı + `<service>` için; cargo-apk ikisini de desteklemiyor). Manifest elle tutulur; versionCode cargo-apk formülüyle (`1<<24 | major<<16 | minor<<8 | patch`) betikte hesaplanır.
 
 ### Faz 1 — Masaüstünde telefon UI'ı (şu an buradayız)
 - [x] Protokol v1, istemci, mock sunucu, Slint ekranı (iskelet çalışıyor, mock ile uçtan uca test edildi)

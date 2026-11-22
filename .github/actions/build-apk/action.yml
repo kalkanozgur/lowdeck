@@ -1,5 +1,5 @@
 name: build-apk
-description: Android araç zinciri kur, lowdeck-phone release APK'sını derle ve imzala
+description: Android araç zinciri kur (cargo-ndk + aapt2/apksigner), lowdeck-phone release APK'sını derle ve imzala
 inputs:
   keystore_b64:
     description: base64 release keystore (boşsa geçici keystore üretilir)
@@ -37,11 +37,12 @@ runs:
         yes | "$SDKM" --licenses > /dev/null || true
         "$SDKM" --install "platforms;android-34" "build-tools;34.0.0" "ndk;27.2.12479018" > /dev/null
         echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+        echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
         echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
 
     - uses: taiki-e/install-action@v2
       with:
-        tool: cargo-apk
+        tool: cargo-ndk
 
     - name: Keystore
       shell: bash
@@ -61,19 +62,16 @@ runs:
             -dname "CN=LowDeck CI" > /dev/null
           echo "::warning::Geçici keystore: bu APK önceki kurulumun üstüne yüklenemez (önce kaldır)"
         fi
-        echo "CARGO_APK_RELEASE_KEYSTORE=$KS" >> "$GITHUB_ENV"
-        echo "CARGO_APK_RELEASE_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+        echo "KS=$KS" >> "$GITHUB_ENV"
+        echo "::add-mask::$PASS"
+        echo "KS_PASS=$PASS" >> "$GITHUB_ENV"
 
-    - name: cargo apk build
-      shell: bash
-      run: cargo apk build -p lowdeck-phone --release --target aarch64-linux-android --lib
-
-    - name: APK'yı bul
+    - name: APK derle (cargo-ndk + aapt2 + apksigner)
       id: find
       shell: bash
       run: |
-        APK=$(find target -path '*release*' -name '*.apk' | head -n1)
-        test -n "$APK" || { echo "APK bulunamadı"; exit 1; }
+        APK=target/apk/lowdeck-phone.apk
+        OUT="$APK" bash scripts/build-apk.sh
         ls -la "$APK"
         echo "apk=$APK" >> "$GITHUB_OUTPUT"
         echo "### APK: $(du -h "$APK" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
