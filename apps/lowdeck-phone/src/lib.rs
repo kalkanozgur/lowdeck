@@ -8,6 +8,7 @@ mod config;
 mod discover;
 mod events;
 mod graph;
+mod notify;
 mod tabs;
 
 use config::AppConfig;
@@ -42,6 +43,17 @@ const PEEK_EVERY: Duration = Duration::from_secs(600);
 const PEEK_FOR: Duration = Duration::from_secs(15);
 /// Üst üste bu kadar kopuştan sonra (geri çekilme 1+2+4 s ≈ 7 s) keşif; sonra her 5 kopuşta bir (≈ 2,5 dk).
 const REDISCOVER_AFTER: u32 = 3;
+
+/// Şu an istenen konular: arka planda yalnız olaylar (ADR-0011), perdede seyrek push'lar, yoksa sekme.
+fn wanted(ui: &MainWindow) -> Topics {
+    if BG.get() {
+        TOPIC_EVENTS
+    } else if ui.get_blackout() {
+        DARK_TOPICS
+    } else {
+        topics(ui.get_tab())
+    }
+}
 
 /// Ekran açıkken sekmeye göre konular: görünmeyen veri için PC de telefon da uyanmasın.
 /// Olaylar (alarm bandı + Olaylar listesi) her sekmede; seyrek gelir.
@@ -105,6 +117,8 @@ thread_local! {
     static REHOME: RefCell<Option<FoundHook>> = const { RefCell::new(None) };
     /// Son bağlantıdan beri üst üste kopuş.
     static FAILS: Cell<u32> = const { Cell::new(0) };
+    /// Uygulama arka planda (ADR-0011): yalnız olay aboneliği, perde/arada açılış yok, bildirim var.
+    static BG: Cell<bool> = const { Cell::new(false) };
     /// Aktif alarmların ham adları (bant `events::short` ile gösterir); asıl liste sunucuda.
     static ALARMS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
@@ -166,6 +180,7 @@ fn android_main(app: slint::android::AndroidApp) {
         WindowManagerFlags::KEEP_SCREEN_ON | WindowManagerFlags::FULLSCREEN,
         WindowManagerFlags::empty(),
     );
+    let bg_app = app.clone();
     slint::android::init_with_event_listener(app, |ev| {
         let active = match ev {
             PollEvent::Main(MainEvent::Pause) => false,
@@ -179,6 +194,9 @@ fn android_main(app: slint::android::AndroidApp) {
         });
     })
     .expect("slint android init");
+    if let Err(e) = notify::start(&bg_app) {
+        eprintln!("DeckService: {e}"); // bildirim olmaz, uygulama çalışır
+    }
     run(data_dir, &device_name()).expect("run");
 }
 
@@ -251,7 +269,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                 },
             );
             // Perde inikken metrik yok: ekranda görünmeyen veri için PC de telefon da uyanmasın.
-            c.subscribe(if ui.get_blackout() { DARK_TOPICS } else { topics(ui.get_tab()) });
+            c.subscribe(wanted(&ui));
             *client.borrow_mut() = Some(c);
         }
     };
@@ -268,9 +286,9 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
                 ui.set_blackout(true);
                 ui.set_lm_state(0);
                 ui.set_ai_state(0);
-            }
-            if let Some(c) = client.borrow().as_ref() {
-                c.subscribe(DARK_TOPICS);
+                if let Some(c) = client.borrow().as_ref() {
+                    c.subscribe(wanted(&ui));
+                }
             }
         })
     };
@@ -287,6 +305,9 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
         let weak = ui.as_weak();
         let client = client.clone();
         Rc::new(move |d: Duration| {
+            if BG.get() {
+                return; // arka planda ekran yok: abonelik olaylarda kalır
+            }
             arm(d);
             let Some(ui) = weak.upgrade() else { return };
             ui.set_blackout(false);
@@ -456,27 +477,25 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
         });
     }
 
-    // --- Yaşam döngüsü: arka planda bağlantı yok (sıfır ağ trafiği) ---
+    // --- Yaşam döngüsü: arka planda bağlantı sürer, yalnız olaylar (ADR-0011) ---
     {
         let client = client.clone();
         let connect = connect.clone();
         let current = current.clone();
-        let generation = generation.clone();
         let weak = ui.as_weak();
         ON_ACTIVE.with(|h| {
             *h.borrow_mut() = Some(Box::new(move |active| {
+                BG.set(!active);
                 if active {
+                    // uygulama açık: bant gösterir
+                    ["uac", "firewall", "Claude.Input"].into_iter().filter_map(notify::alert_id).for_each(notify::cancel);
                     poke();
                     if client.borrow().is_none() {
                         connect(&current.borrow());
                     }
-                } else {
-                    client.borrow_mut().take();
-                    generation.fetch_add(1, Ordering::Relaxed);
-                    if let Some(ui) = weak.upgrade() {
-                        ui.set_connected(false);
-                        ui.set_status("Paused".into());
-                    }
+                } else if let (Some(ui), Some(c)) = (weak.upgrade(), client.borrow().as_ref()) {
+                    ui.set_blackout(true);
+                    c.subscribe(wanted(&ui));
                 }
             }))
         });
@@ -734,7 +753,15 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
                 1 => a.retain(|x| *x != e.name),
                 _ => {}
             });
-            // Alarm kalktı (kullanım kuralı ya da PC sıcaklık eşiği): perde iniksa ekranı aç
+            // Arka planda: yalnız UAC/güvenlik duvarı/Claude için Android bildirimi (ADR-0011)
+            if let Some(id) = notify::alert_id(&e.name).filter(|_| BG.get()) {
+                match e.kind {
+                    0 => notify::alert(id, &events::desc(&e)),
+                    1 => notify::cancel(id),
+                    _ => {}
+                }
+            }
+            // Alarm geldi (kullanım kuralı ya da PC sıcaklık eşiği): perde iniksa ekranı aç
             let wake = e.kind == 0 && ui.get_blackout();
             prepend(ui, &[e]);
             if wake {

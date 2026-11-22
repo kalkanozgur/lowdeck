@@ -2648,6 +2648,7 @@ dependencies = [
 name = "lowdeck-phone"
 version = "1.0.0"
 dependencies = [
+ "jni 0.21.1",
  "libc",
  "lowdeck-client",
  "lowdeck-proto",

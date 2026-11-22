@@ -4,6 +4,7 @@ Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve comm
 ## [Unreleased]
 ### Eklendi
 - Telefon: LowMonitor v1.1.0 olayları okunur: UAC / güvenlik duvarı istemi (`uac`, `firewall`), Claude girdi bekliyor (`Claude.Input`), PC sıcaklık eşiği (`Temp.CPU/GPU/Disk`, değer °C), `uac_unavailable`. Alarm bandında kısa ad (ör. "UAC, CPU temp")
+- Telefon (ADR-0011): uygulama arka plandayken / ekran kapalıyken de PC'ye bağlı kalır (foreground service, kalıcı "Listening for PC alerts" bildirimi); PC'de UAC ya da güvenlik duvarı istemi açılınca veya Claude girdi isteyince titreşimli Android bildirimi, istem kapanınca bildirim kalkar. Sıcaklık/kullanım alarmları bildirim üretmez. Arka planda yalnız olay aboneliği (metrik akışı yok)
 ### Değişti
 - Telefon: Hello'daki cihaz adı sabit "toco" yerine Android model adı (`ro.product.model`); LM'de çoklu telefon (LM ADR-0036) tray'de ayırt edilir
 

@@ -83,7 +83,7 @@ adb install -r lowdeck-*.apk        # telefona kur (USB hata ayıklama açıksa)
 ## 5. Kodlama kuralları
 ### Tüketim (öncelik 1)
 - **Sürekli Timer, animasyon, polling yasak.** Yeniden çizim yalnızca property değişince olur. Yeni periyodik iş eklemeden önce kullanıcıya sor.
-- Tek periyodik uyanma: istemcideki Ping (25 s). Masaüstü istisnası: Süreçler sekmesi açıkken 2 s tarama (ADR-0006). İstisna: boşta perde timer'ı tek-atışlık, dokunuşta yeniden kurulur (periyodik değil). Ölü bağlantı tespiti `READ_TIMEOUT` (60 s) ile.
+- Tek periyodik uyanma: istemcideki Ping (25 s); arka planda da sürer (foreground service, yalnız olay aboneliği, ADR-0011). Masaüstü istisnası: Süreçler sekmesi açıkken 2 s tarama (ADR-0006). İstisna: boşta perde timer'ı tek-atışlık, dokunuşta yeniden kurulur (periyodik değil). Ölü bağlantı tespiti `READ_TIMEOUT` (60 s) ile.
 - Arka plan rengi saf siyah (`#000000`): AMOLED'de siyah piksel güç harcamaz. Büyük beyaz/açık alan kullanılmaz.
 - Slider gibi sürekli girdiler throttle'lanır (şu an 50 ms ≈ 20 Hz). Son değer tek seferlik timer'la mutlaka gönderilir.
 - Okuma döngüsünde tahsis yok (çerçeve buffer'ı yeniden kullanılır). Yeni bağımlılık eklemeden önce boyut ve gerekçe söylenir.
@@ -152,7 +152,7 @@ Build 2026-11-22'de cargo-apk'tan elle aapt2 betiğine geçti (Java sınıfı + 
 ### Faz 2 — Android
 - [ ] APK build. Telefon tamir edilene kadar başka bir Android cihazda ya da emülatörde test.
 - [x] Ekran açık tutma: önde iken `KEEP_SCREEN_ON` (`AndroidApp::set_window_flags`, JNI yok) + 120 s dokunulmazsa tam siyah perde (tek-atışlık `Timer::restart`). Karar 2026-11-14.
-- [x] Yaşam döngüsü: `init_with_event_listener` → `MainEvent::Pause` client drop, `Resume` yeniden bağlan. Cihazda ölçülecek.
+- [x] Yaşam döngüsü: `init_with_event_listener` → `MainEvent::Pause` arka plan (bağlantı sürer, yalnız `TOPIC_EVENTS`; UAC/firewall/Claude.Input → Android bildirimi), `Resume` sekme konuları. Foreground service `DeckService.java` ([ADR-0011](docs/kararlar/ADR-0011-arka-plan-bildirimi.md)). Arka plan tüketimi ölçülecek.
 - [ ] Wi-Fi uyku politikası ve yeniden bağlanma davranışını ölç.
 
 ### Faz 3 — Tüketim ölçümü ve ayar
