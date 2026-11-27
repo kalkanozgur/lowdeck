@@ -5,7 +5,7 @@ Türkçe: [README.tr.md](README.tr.md)
 
 | Field | Value |
 |---|---|
-| Status | v1.1.0 — tested on a Mi Note 10 Lite (Android 12) and a Samsung M21 |
+| Status | v1.2.0 — tested on a Mi Note 10 Lite (Android 12) and a Samsung M21; power buttons need LowMonitor v1.4.0 |
 | Modules | software (Rust workspace: proto, client, phone, mock-server) |
 | Started | 2026-11-14 |
 

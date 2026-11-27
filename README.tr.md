@@ -5,7 +5,7 @@ English: [README.md](README.md)
 
 | Alan | Değer |
 |---|---|
-| Durum | v1.1.0 — Mi Note 10 Lite (Android 12) ve Samsung M21'de denendi |
+| Durum | v1.2.0 — Mi Note 10 Lite (Android 12) ve Samsung M21'de denendi; güç düğmeleri LowMonitor v1.4.0 ister |
 | Modüller | yazılım (Rust workspace: proto, client, phone, mock-server) |
 | Başlangıç | 2026-11-14 |
 
