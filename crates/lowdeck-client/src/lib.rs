@@ -95,6 +95,16 @@ impl Client {
         send_on(&self.writer, msg)
     }
 
+    /// Bağlantıyı hemen kapatır; net thread geri çekilmeyle yeniden bağlanır. Yanıt beklenen komut
+    /// gelmediyse (ölü bağlantı, ör. PC uykudan döndü) `READ_TIMEOUT`'u beklememek için.
+    pub fn reconnect(&self) {
+        if let Ok(mut g) = self.writer.lock() {
+            if let Some(w) = g.take() {
+                let _ = w.get_ref().shutdown(std::net::Shutdown::Both);
+            }
+        }
+    }
+
     pub fn audio(&self, cmd: AudioCmd) -> bool {
         self.send(&C2S::Audio(cmd))
     }

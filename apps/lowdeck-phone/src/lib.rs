@@ -32,6 +32,8 @@ const VOLUME_THROTTLE: Duration = Duration::from_millis(50);
 /// Yerel değişiklikten sonra sunucudan gelen ses değeri bu süre yok sayılır
 /// (slider'ın geri zıplamasını önler).
 const LOCAL_ECHO_GUARD: Duration = Duration::from_millis(400);
+/// Güç komutu yanıtı (LAN'da < 50 ms beklenir); gelmezse bağlantı ölü sayılır (ADR-0012).
+const POWER_REPLY_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Bu süre dokunulmazsa siyah perde iner.
 const BLACKOUT_AFTER: Duration = Duration::from_secs(120);
@@ -105,6 +107,10 @@ thread_local! {
     static OFFSET_S: Cell<i64> = const { Cell::new(0) };
     /// `apply` içinden gönderim (sıcaklık sorgusu, bağlanınca süreç görünümü); `run` kurar.
     static SEND: RefCell<Option<SendHook>> = const { RefCell::new(None) };
+    /// Bağlantıyı yeniden kur (`Client::reconnect`); `run` kurar.
+    static RECONNECT: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
+    /// Güç komutu yanıtı bekleniyor (sayaç): `PowerResult` gelince artar, zaman aşımı eski sayacı görürse yok sayar.
+    static POWER_WAIT: Cell<u32> = const { Cell::new(0) };
     /// Son süreç listesi: `Kill` için ctime + sonuç metni için ad.
     static PROCS: RefCell<Vec<ProcItem>> = const { RefCell::new(Vec::new()) };
     /// `SetAiConfig` yanıtı bekleniyor: hatasız `AiConfig` gelirse "Saved".
@@ -356,6 +362,16 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
         });
     }
     {
+        let client = client.clone();
+        RECONNECT.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move || {
+                if let Some(c) = client.borrow().as_ref() {
+                    c.reconnect();
+                }
+            }))
+        });
+    }
+    {
         let weak = ui.as_weak();
         ui.on_procs_view(move || {
             if let Some(ui) = weak.upgrade() {
@@ -477,15 +493,38 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
         });
     }
     // Güç (ADR-0012): onay UI'da (iki aşama); sonuç `S2C::PowerResult` ile
-    ui.on_power(move |i| {
-        let cmd = match i {
-            0 => PowerCmd::Sleep,
-            1 => PowerCmd::Shutdown,
-            2 => PowerCmd::Restart,
-            _ => PowerCmd::Cancel,
-        };
-        send(&C2S::Power(cmd));
-    });
+    {
+        let weak = ui.as_weak();
+        ui.on_power(move |i| {
+            let cmd = match i {
+                0 => PowerCmd::Sleep,
+                1 => PowerCmd::Shutdown,
+                2 => PowerCmd::Restart,
+                _ => PowerCmd::Cancel,
+            };
+            let Some(ui) = weak.upgrade() else { return };
+            if !send(&C2S::Power(cmd)) {
+                ui.set_power_msg("Not sent: no connection to PC".into());
+                return;
+            }
+            // Yanıt gelmezse bağlantı ölü (ör. PC uykudan döndü, TCP koptu ama telefon bilmiyor):
+            // kullanıcıya söyle ve READ_TIMEOUT'u (60 s) beklemeden yeniden bağlan. Tek-atışlık.
+            let n = POWER_WAIT.get().wrapping_add(1);
+            POWER_WAIT.set(n);
+            ui.set_power_msg("Sending…".into());
+            let w = weak.clone();
+            slint::Timer::single_shot(POWER_REPLY_TIMEOUT, move || {
+                if POWER_WAIT.get() != n {
+                    return; // yanıt geldi
+                }
+                if let Some(ui) = w.upgrade() {
+                    ui.set_power_msg("No reply from PC, reconnecting".into());
+                    ui.set_power_pending(false);
+                }
+                RECONNECT.with_borrow(|f| f.as_ref().map(|f| f()));
+            });
+        });
+    }
 
     // --- Yaşam döngüsü: arka planda bağlantı sürer, yalnız olaylar (ADR-0011) ---
     {
@@ -689,6 +728,7 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
     ON_ACTIVE.with(|h| h.borrow_mut().take());
     QUERY_EVENTS.with(|h| h.borrow_mut().take());
     SEND.with(|h| h.borrow_mut().take());
+    RECONNECT.with(|h| h.borrow_mut().take());
     WAKE.with(|h| h.borrow_mut().take());
     REMEMBER.with(|h| h.borrow_mut().take());
     REHOME.with(|h| h.borrow_mut().take());
@@ -850,6 +890,7 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
             );
         }
         Event::Msg(S2C::PowerResult { cmd, code, delay_s }) => {
+            POWER_WAIT.set(POWER_WAIT.get().wrapping_add(1)); // bekleyen zaman aşımını iptal et
             ui.set_power_msg(tabs::power_text(cmd, code, delay_s).into());
             let ok = code == lowdeck_proto::POWER_OK;
             match cmd {
@@ -864,6 +905,13 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
                     });
                 }
                 PowerCmd::Cancel => ui.set_power_pending(false),
+                // PC uykuya giriyor: bağlantı sessizce ölecek. Hemen kapat ki UI "Connecting" göstersin ve
+                // PC uyanınca READ_TIMEOUT'u beklemeden bağlanılsın (geri çekilme ≤ 30 s).
+                PowerCmd::Sleep if ok => {
+                    slint::Timer::single_shot(Duration::from_secs(1), || {
+                        RECONNECT.with_borrow(|f| f.as_ref().map(|f| f()));
+                    });
+                }
                 _ => {}
             }
         }
