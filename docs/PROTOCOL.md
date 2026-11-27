@@ -41,11 +41,13 @@ S → C  Media(MediaState)                 # tam durum
 | 11 | `QueryAiReport` | `view: u8` (0 son oturum, 1 bugün, 2 hafta) | Yanıt `AiReport` (ADR-0009) |
 | 12 | `QueryAiConfig` | — | Yanıt `AiConfig` (ADR-0010) |
 | 13 | `SetAiConfig` | `AiConfig` | `ai.toml`'a yazar, tray yeniden yükler; yanıt `AiConfig` (ADR-0010) |
+| 14 | `Power` | `PowerCmd` | PC güç komutu; yanıt `PowerResult`. Yetki = token + LM `deck.toml` `power` (ADR-0012) |
 
-8–11 ek varyant, `PROTO_VERSION` 4: eski sunucu çözemez → bağlantı düşer; **LM önce güncellenir**.
+8–14 ek varyant, `PROTO_VERSION` 4: eski sunucu çözemez → bağlantı düşer; **LM önce güncellenir**.
 
 `AudioCmd`: `SetVolume(u8 0..=100)` · `Step(i8)` · `ToggleMute`
 `MediaCmd`: `PlayPause` · `Next` · `Prev` · `Stop`
+`PowerCmd`: `Sleep` · `Shutdown` · `Restart` · `Cancel` (Shutdown/Restart 10 s iptal edilebilir geri sayım; Cancel süreni iptal eder)
 
 ### S2C (sunucu → istemci)
 | # | Varyant | Alanlar |
@@ -68,6 +70,7 @@ S → C  Media(MediaState)                 # tam durum
 | 15 | `KillResult` | `pid: u32, code: i32`: 0 = sonlandı, aksi Win32 hata kodu |
 | 16 | `AiReport` | `AiReport` (tek çerçeve): limit çizgileri + token dökümü + oturumlar |
 | 17 | `AiConfig` | `cfg: AiConfig, error: String` | Dosyadaki geçerli ayar; `error` boş değilse yazılmadı (≤ 120) |
+| 18 | `PowerResult` | `cmd: PowerCmd, code: i32, delay_s: u16`: `code` 0 = başladı, -1 = PC'de kapalı (`deck.toml` `power = false`), aksi Win32 hata kodu; `delay_s` = geri sayım (Shutdown/Restart), diğerlerinde 0 (ADR-0012) |
 
 `TempPoint`: `cpu_c`, `gpu_c: Option<i16>` (°C, kova ort.), `gpu_pct: Option<u8>`, `disk_c_max: Option<i16>`. `ProcItem`: `pid: u32`, `ctime: i64` (sunucuya özgü, `Kill`'de geri), `name` (≤ 32), `cpu: u16` (0,01 %), `ws_mb: u32`, `protected: bool`. `AiReport`: `from_s, to_s: u64`, `session_line, week_line: Vec<Option<u16>>` (100 eşit kova, 0,1 %), `session_count: u16`, `request_count: u32`, `total_tokens: u64`, `groups: Vec<AiGroup { name, share: u16 (0,1 %), tokens: u64 }>` (≤ 8, ad sunucu dilinde), `sessions: Vec<AiSession { ended_at: u64 (0 = sürüyor), project, requests: u32, tokens: u64, top, top_share: u16 }>` (≤ 20). En kötü boyutlar test `adr0009_fit_frame` ile ≤ 4096 B. `AiConfig` (ADR-0010): `lang: u8` (0 tr, 1 en), `refresh_sec: u32` (30–86 400), `auth: u8` (0 auto, 1 OAuth, 2 Web), `csv_log: bool`, `report_sessions: u16` (1–200); sınırlar `AiConfig::check`.
 

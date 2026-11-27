@@ -12,7 +12,7 @@ Türkçe: [README.tr.md](README.tr.md)
 ## Features (phone)
 | Tab | Content |
 |---|---|
-| Control | PC volume / mute, media (play/pause, prev/next, now playing), lock PC keyboard |
+| Control | PC volume / mute, media (play/pause, prev/next, now playing), lock PC keyboard, sleep / shut down / restart PC (two-step confirm, 10 s cancellable countdown) |
 | Live | Claude usage band, CPU / GPU / RAM / disk / network cards with 5 min graphs, °C, cores, top-5 |
 | Events | Last 24 h of LowMonitor alarms and system events; alarm band on every tab |
 | History | 1 h / 6 h / 24 h / 7 d: CPU, RAM, disk, network, GPU, temperatures |

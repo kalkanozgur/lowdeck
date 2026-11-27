@@ -1,9 +1,9 @@
 //! Komut satırı test istemcisi (UI'sız uçtan uca test).
 //! `cargo run -p lowdeck-client --example cli -- 127.0.0.1 47810 dev`
-//! Komutlar: v <0-100> | + | - | m | p | n | b | s <topic bitleri> | e (son 24 sa olay) | h <saat> (geçmiş, 600 kova) | l (tuş kilidi) | q
+//! Komutlar: v <0-100> | + | - | m | p | n | b | s <topic bitleri> | e (son 24 sa olay) | h <saat> (geçmiş, 600 kova) | l (tuş kilidi) | z (uyku) | o (kapat) | r (yeniden başlat) | c (kapatmayı iptal) | q
 
 use lowdeck_client::{Client, Config};
-use lowdeck_proto::{AudioCmd, MediaCmd, C2S, DEFAULT_PORT};
+use lowdeck_proto::{AudioCmd, MediaCmd, PowerCmd, C2S, DEFAULT_PORT};
 use std::io::BufRead;
 
 fn main() {
@@ -38,6 +38,11 @@ fn main() {
                 c.send(&C2S::QueryHistory { from_ms: now.saturating_sub(hours * 3_600_000), to_ms: now, points: 600 })
             }
             Some("l") => c.send(&C2S::Lock),
+            // ADR-0012: onay yok, test aracı; gerçek PC'de dikkat
+            Some("z") => c.send(&C2S::Power(PowerCmd::Sleep)),
+            Some("o") => c.send(&C2S::Power(PowerCmd::Shutdown)),
+            Some("r") => c.send(&C2S::Power(PowerCmd::Restart)),
+            Some("c") => c.send(&C2S::Power(PowerCmd::Cancel)),
             Some("q") => break,
             _ => continue,
         };

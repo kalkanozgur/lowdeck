@@ -52,6 +52,9 @@ pub enum C2S {
     QueryAiConfig,
     /// `ai.toml`'a yaz (yalnız değişen alanlar, yorumlar korunur) + tray yeniden yükler. Yanıt `S2C::AiConfig`.
     SetAiConfig(AiConfig),
+    // ---- ADR-0012 (ek varyant, v4; eski LM çözemez → LM önce güncellenir) ----
+    /// PC güç komutu (uyku / kapat / yeniden başlat / iptal). Yanıt `S2C::PowerResult`. Yetki = token + LM `deck.toml` `power`.
+    Power(PowerCmd),
 }
 
 pub type Topics = u8;
@@ -82,6 +85,24 @@ pub enum MediaCmd {
     Prev,
     Stop,
 }
+
+/// ADR-0012. Varyantlar yalnız sona eklenir (ör. ileride `Hibernate`).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub enum PowerCmd {
+    /// Uyku (S3 / Modern Standby); gecikme yok.
+    Sleep,
+    /// Kapat; sunucu `delay_s` geri sayım başlatır, `Cancel` ile iptal edilebilir.
+    Shutdown,
+    /// Yeniden başlat; `Shutdown` ile aynı geri sayım.
+    Restart,
+    /// Süren kapatma/yeniden başlatma geri sayımını iptal et.
+    Cancel,
+}
+
+/// `PowerResult.code`: başarı.
+pub const POWER_OK: i32 = 0;
+/// `PowerResult.code`: PC'de `deck.toml` `power = false` (Win32 kodlarıyla çakışmaz).
+pub const POWER_DISABLED: i32 = -1;
 
 // ---------------- Sunucu -> İstemci ----------------
 
@@ -122,6 +143,10 @@ pub enum S2C {
     // ---- ADR-0010 ----
     /// `QueryAiConfig` / `SetAiConfig` yanıtı: dosyadaki geçerli ayar; `error` boş değilse yazılmadı (≤ `AI_TEXT_MAX`).
     AiConfig { cfg: AiConfig, error: String },
+    // ---- ADR-0012 ----
+    /// `Power` sonucu: `code` = `POWER_OK`, `POWER_DISABLED` ya da Win32 hata kodu;
+    /// `delay_s` = başlayan geri sayım (Shutdown/Restart), diğerlerinde 0.
+    PowerResult { cmd: PowerCmd, code: i32, delay_s: u16 },
 }
 
 /// LM `ai.toml`'un telefondan değişen kısmı (ADR-0010; taskbar ve renkler hariç).
@@ -464,6 +489,8 @@ mod tests {
             C2S::Subscribe(TOPIC_METRICS | TOPIC_EVENTS),
             C2S::QueryEvents { from_ms: 1, to_ms: u64::MAX },
             C2S::Lock,
+            C2S::Power(PowerCmd::Sleep),
+            C2S::Power(PowerCmd::Cancel),
         ];
         let mut wire = Vec::new();
         for m in &msgs {
@@ -644,5 +671,16 @@ mod tests {
         let mut wire = Vec::new();
         write_frame(&mut wire, &C2S::Media(MediaCmd::PlayPause)).unwrap();
         assert!(wire.len() <= 4, "komut çerçevesi {} bayt", wire.len());
+    }
+
+    /// ADR-0012: varyant indeksleri sabit (sona ekleme kuralı; LM aynı rev'i kullanır).
+    #[test]
+    fn power_wire_indices() {
+        let c = postcard::to_allocvec(&C2S::Power(PowerCmd::Restart)).unwrap();
+        assert_eq!(c, [14, 2]);
+        let r = S2C::PowerResult { cmd: PowerCmd::Shutdown, code: POWER_DISABLED, delay_s: 10 };
+        let b = postcard::to_allocvec(&r).unwrap();
+        assert_eq!(b[..2], [18, 1]);
+        assert_eq!(postcard::from_bytes::<S2C>(&b).unwrap(), r);
     }
 }

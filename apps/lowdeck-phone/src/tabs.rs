@@ -1,7 +1,7 @@
 //! Süreçler ve AI raporu sekmelerinin metinleri (ADR-0009). Biçim lowmon-ui ile aynı (İngilizce).
 
 use crate::{AiGroupRow, AiSessRow, ProcRow};
-use lowdeck_proto::{AiReport, ProcItem};
+use lowdeck_proto::{AiReport, PowerCmd, ProcItem, POWER_DISABLED, POWER_OK};
 
 pub fn proc_row(p: &ProcItem) -> ProcRow {
     ProcRow {
@@ -27,6 +27,22 @@ pub fn kill_text(code: i32, name: &str) -> String {
         3 => format!("{name}: protected process, cannot be ended"),
         5 => format!("{name}: access denied (needs administrator; end it on the PC)"),
         c => format!("{name}: could not be ended (code {c})"),
+    }
+}
+
+/// `S2C::PowerResult` metni (ADR-0012). Kodlar: `POWER_*` ya da Win32.
+pub fn power_text(cmd: PowerCmd, code: i32, delay_s: u16) -> String {
+    match (cmd, code) {
+        (_, POWER_DISABLED) => "Power commands are off on the PC (deck.toml: power = false)".into(),
+        (PowerCmd::Sleep, POWER_OK) => "PC is going to sleep".into(),
+        (PowerCmd::Shutdown, POWER_OK) => format!("PC shuts down in {delay_s} s"),
+        (PowerCmd::Restart, POWER_OK) => format!("PC restarts in {delay_s} s"),
+        (PowerCmd::Cancel, POWER_OK) => "Shutdown cancelled".into(),
+        (PowerCmd::Cancel, 1116) => "No shutdown in progress".into(), // ERROR_NO_SHUTDOWN_IN_PROGRESS
+        (_, 1115) => "A shutdown is already in progress".into(), // ERROR_SHUTDOWN_IN_PROGRESS
+        (_, 1314) => "PC user lacks the shutdown privilege".into(), // ERROR_PRIVILEGE_NOT_HELD
+        (_, 50) => "Not supported on this PC".into(), // ERROR_NOT_SUPPORTED (ör. uyku kapalı)
+        (cmd, c) => format!("{cmd:?} failed (code {c})"),
     }
 }
 
@@ -109,6 +125,10 @@ mod tests {
         assert_eq!(tokens(81_200), "81.2 K");
         assert_eq!(tokens(3_040_000), "3.04 M");
         assert_eq!(kill_text(0, "a.exe"), "a.exe ended");
+        assert_eq!(power_text(PowerCmd::Shutdown, 0, 10), "PC shuts down in 10 s");
+        assert_eq!(power_text(PowerCmd::Sleep, 1314, 0), "PC user lacks the shutdown privilege");
+        assert!(power_text(PowerCmd::Restart, POWER_DISABLED, 0).contains("power = false"));
+        assert_eq!(power_text(PowerCmd::Restart, 87, 0), "Restart failed (code 87)");
         let p = proc_row(&ProcItem {
             pid: 7,
             cpu: 4,

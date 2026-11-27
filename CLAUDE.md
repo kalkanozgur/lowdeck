@@ -72,7 +72,7 @@ cargo run -p lowdeck-phone --bin lowdeck-phone-dev
 
 # UI'sız test
 cargo run -p lowdeck-client --example cli -- 127.0.0.1 47810 dev
-#   v 70 | + | - | m | p | n | b | q
+#   v 70 | + | - | m | p | n | b | l | z | o | r | c | q
 
 # Android APK: lokalde değil, GitHub Actions'ta (bkz. Faz 0)
 gh pr create --fill                 # PR → CI APK artifact

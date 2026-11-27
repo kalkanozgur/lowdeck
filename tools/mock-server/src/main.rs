@@ -148,6 +148,12 @@ fn handle(stream: TcpStream, token: &str) -> Result<(), FrameError> {
             }
             C2S::Hello { .. } => write_frame(&mut wr, &S2C::Error(ErrorCode::Unsupported))?,
             C2S::Lock => println!("<< Lock"),
+            // ADR-0012: gerçek işlem yok; LM ile aynı yanıt (Shutdown/Restart 10 s geri sayım)
+            C2S::Power(cmd) => {
+                println!("<< Power({cmd:?})");
+                let delay_s = if matches!(cmd, PowerCmd::Shutdown | PowerCmd::Restart) { 10 } else { 0 };
+                write_frame(&mut wr, &S2C::PowerResult { cmd, code: POWER_OK, delay_s })?;
+            }
             // ADR-0009/0010 mesajları mock'ta yok: test gerçek LM tray ile (kullanıcı kararı 2026-11-18)
             C2S::QueryTempHistory { .. }
             | C2S::ProcView { .. }
