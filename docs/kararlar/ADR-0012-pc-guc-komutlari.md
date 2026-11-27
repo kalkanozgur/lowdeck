@@ -23,3 +23,7 @@ Standart kullanıcı token'ında `SeShutdownPrivilege` vardır ama kapalıdır; 
 - (−) Eski LM `Power` çerçevesini çözemez → bağlantı düşer. **LM sürümü önce çıkar**, APK sonra.
 - (−) Uyandırma (Wake-on-LAN) yok: sunucunun MAC'i ve NIC/BIOS ayarı gerekir, ayrı iş.
 - (−) Uykuda TCP kopar; telefon mevcut yeniden bağlanma döngüsüyle döner.
+
+## Ek (2026-11-27, gerçek PC testi)
+- Sleep M21 + LM `fb3d099` ile çalıştı (Kernel-Power 187/42, S3). PC uyanınca LM eski bağlantıyı kapattı (10053) ama telefon 47 s "Connected" kaldı; arada gönderilen Restart/Cancel kayboldu.
+- Düzeltme: `PowerResult` 3 s içinde gelmezse (`POWER_REPLY_TIMEOUT`, tek-atışlık) mesaj + `Client::reconnect()`; Sleep `POWER_OK` → 1 s sonra `reconnect()`. Periyodik iş yok.
