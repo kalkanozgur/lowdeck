@@ -15,7 +15,7 @@ use config::AppConfig;
 use graph::{nice_scale, series_path, History, Sample};
 use lowdeck_client::{Client, Config, Event};
 use lowdeck_proto::{
-    AiConfig, AiUsage, AiWindow, AudioCmd, Beacon, EventItem, HistPoint, MediaCmd, Metrics, ProcItem, Sensors,
+    AiConfig, AiUsage, AiWindow, AudioCmd, Beacon, EventItem, HistPoint, MediaCmd, Metrics, PowerCmd, ProcItem, Sensors,
     TempPoint, TopItem, Topics, C2S, HIST_POINTS_MAX, PROTO_VERSION, S2C, TOPIC_AI, TOPIC_EVENTS,
     TOPIC_METRICS, TOPIC_PROCS, TOPIC_SENSORS,
 };
@@ -476,6 +476,16 @@ pub fn run(data_dir: Option<PathBuf>, device_name: &str) -> Result<(), slint::Pl
             }
         });
     }
+    // Güç (ADR-0012): onay UI'da (iki aşama); sonuç `S2C::PowerResult` ile
+    ui.on_power(move |i| {
+        let cmd = match i {
+            0 => PowerCmd::Sleep,
+            1 => PowerCmd::Shutdown,
+            2 => PowerCmd::Restart,
+            _ => PowerCmd::Cancel,
+        };
+        send(&C2S::Power(cmd));
+    });
 
     // --- Yaşam döngüsü: arka planda bağlantı sürer, yalnız olaylar (ADR-0011) ---
     {
@@ -723,6 +733,7 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
         }
         Event::Disconnected { reason } => {
             ui.set_connected(false);
+            ui.set_power_pending(false);
             ui.set_status(format!("Disconnected: {reason}").into());
             // PC IP'si değişmiş olabilir (DHCP): birkaç denemeden sonra keşif, sonra seyrek
             let n = FAILS.get() + 1;
@@ -837,6 +848,24 @@ fn apply(ui: &MainWindow, ev: Event, last_local_edit: &Mutex<Instant>) {
             ui.set_procs_msg(
                 tabs::kill_text(code, &name.unwrap_or_else(|| format!("PID {pid}"))).into(),
             );
+        }
+        Event::Msg(S2C::PowerResult { cmd, code, delay_s }) => {
+            ui.set_power_msg(tabs::power_text(cmd, code, delay_s).into());
+            let ok = code == lowdeck_proto::POWER_OK;
+            match cmd {
+                PowerCmd::Shutdown | PowerCmd::Restart if ok && delay_s > 0 => {
+                    ui.set_power_pending(true);
+                    // PC'de elle iptal edilirse (bildirim yok) Cancel askıda kalmasın: tek-atışlık temizlik
+                    let w = ui.as_weak();
+                    slint::Timer::single_shot(Duration::from_secs(u64::from(delay_s) + 5), move || {
+                        if let Some(ui) = w.upgrade() {
+                            ui.set_power_pending(false);
+                        }
+                    });
+                }
+                PowerCmd::Cancel => ui.set_power_pending(false),
+                _ => {}
+            }
         }
         Event::Msg(S2C::AiReport(r)) => draw_ai_report(ui, &r),
         Event::Msg(S2C::AiConfig { cfg, error }) => {

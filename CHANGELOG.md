@@ -2,6 +2,12 @@
 Format: Keep a Changelog. Sürümleme: SemVer (`CLAUDE.md` > Sürümleme ve commit).
 
 ## [Unreleased]
+### Eklendi
+- Telefon (ADR-0012): Control sekmesinde **Sleep / Shut down / Restart**. İki aşamalı onay (ilk dokunuş "Confirm", 3 s içinde ikinci dokunuş gönderir); kapatma/yeniden başlatma PC'de 10 s geri sayımla başlar, telefondaki **Cancel** ile iptal edilir. LowMonitor'un güç komutunu destekleyen sürümü gerekir (eski sürümde bağlantı düşer)
+- Proto: `C2S::Power(PowerCmd)`, `S2C::PowerResult`, `POWER_OK` / `POWER_DISABLED` (ek varyant, protokol sürümü 4)
+- mock-server `Power` yanıtı; cli `z` / `o` / `r` / `c`
+### Değişti
+- Telefon: "Lock PC keyboard" düğmesi "Lock keys" oldu, güç düğmeleriyle aynı satırda
 
 ## [1.1.0] - 2026-11-22
 LowMonitor v1.1.0 ile uyum + arka plan bildirimi. Protokol değişmedi (sürüm 4).

@@ -12,7 +12,7 @@ English: [README.md](README.md)
 ## Özellikler (telefon)
 | Sekme | İçerik |
 |---|---|
-| Control | PC ses / sessiz, medya (oynat/duraklat, önceki/sonraki, çalan parça), PC klavyesini kilitle |
+| Control | PC ses / sessiz, medya (oynat/duraklat, önceki/sonraki, çalan parça), PC klavyesini kilitle, PC uyku / kapat / yeniden başlat (iki aşamalı onay, 10 sn iptal edilebilir geri sayım) |
 | Live | Claude kullanım bandı, CPU / GPU / RAM / disk / ağ kartları ve 5 dk grafikleri, °C, çekirdekler, top-5 |
 | Events | LowMonitor alarm ve sistem olayları (son 24 sa); alarm bandı her sekmede |
 | History | 1 sa / 6 sa / 24 sa / 7 g: CPU, RAM, disk, ağ, GPU, sıcaklıklar |

@@ -360,12 +360,24 @@ export component MainWindow inherits Window {
     // Boşta siyah perde: AMOLED pikselleri söner (burn-in + tüketim). Dokununca kalkar.
     in-out property <bool> blackout: false;
 
+    // Güç onayı 3 s içinde verilmezse düşer; yalnız onay beklerken çalışır, ilk tetikte durur (periyodik değil).
+    Timer {
+        interval: 3s;
+        running: root.power-armed >= 0;
+        triggered => { root.power-armed = -1; }
+    }
+
     // --- UI -> Rust ---
     callback volume-changed(float);
     callback volume-step(int);
     callback toggle-mute();
     callback media(int); // 0=prev 1=play/pause 2=next 3=stop
     callback lock(); // PC tuş kilidi (cat-lock, ADR-0008)
+    // --- Güç (ADR-0012): iki aşamalı onay; Shutdown/Restart geri sayımı PC'de (10 s), Cancel ile iptal ---
+    in-out property <int> power-armed: -1; // onay bekleyen: 0 sleep, 1 shutdown, 2 restart
+    in property <bool> power-pending: false; // PC'de geri sayım sürüyor → Cancel görünür
+    in property <string> power-msg; // son sonuç / hata
+    callback power(int); // 0 sleep, 1 shutdown, 2 restart, 3 cancel
     callback save-settings() -> bool; // false: doğrulama hatası, cfg-error dolu
 
     // Sekme geçişi: şerit düğmesi ve içerikte yatay kaydırma aynı yoldan (abonelik + sorgu).
@@ -375,6 +387,7 @@ export component MainWindow inherits Window {
         }
         root.tab = i;
         root.procs-armed = -1;
+        root.power-armed = -1;
         root.tab-changed();
         if (i == 3) {
             root.query-history(root.hist-span);
@@ -556,8 +569,32 @@ export component MainWindow inherits Window {
                         }
                         DeckButton { icon: Icons.next; min-height: 80px; enabled: root.connected; clicked => { root.media(2); } }
                     }
-                    // PC tuş kilidi: açma PC'de kodla
-                    DeckButton { label: "Lock PC keyboard"; font-size: 16px; min-height: 52px; enabled: root.connected; clicked => { root.lock(); } }
+                    // PC tuş kilidi (açma PC'de kodla) + güç (ADR-0012): ilk dokunuş "Confirm", ikinci gönderir
+                    if !root.power-pending: HorizontalLayout {
+                        spacing: 8px;
+                        DeckButton { label: "Lock keys"; font-size: 16px; min-height: 52px; enabled: root.connected; clicked => { root.power-armed = -1; root.lock(); } }
+                        for b[i] in ["Sleep", "Shut down", "Restart"]: DeckButton {
+                            label: root.power-armed == i ? "Confirm" : b;
+                            font-size: 16px;
+                            min-height: 52px;
+                            active: root.power-armed == i;
+                            enabled: root.connected;
+                            clicked => {
+                                if (root.power-armed == i) {
+                                    root.power-armed = -1;
+                                    root.power(i);
+                                } else {
+                                    root.power-armed = i;
+                                }
+                            }
+                        }
+                    }
+                    if root.power-pending: HorizontalLayout {
+                        spacing: 12px;
+                        DeckButton { label: "Cancel"; font-size: 16px; min-height: 52px; active: true; enabled: root.connected; clicked => { root.power(3); } }
+                        Text { text: root.power-msg; color: Theme.warn; font-size: 14px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+                    if !root.power-pending && root.power-msg != "": Text { text: root.power-msg; color: Theme.dim; font-size: 13px; overflow: elide; }
                 }
             }
 
